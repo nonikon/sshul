@@ -18,6 +18,7 @@
 #define FLAG_DO_INIT        0x04 // create all stat files
 #define FLAG_DO_CLEAN       0x08 // remove all stat files
 #define FLAG_DO_UPLOAD      0x10 // upload the files to be uploaded
+#define FLAG_GEN_CONFIG     0x20 // generate template config file
 
 static int create_file(const char* path)
 {
@@ -41,7 +42,7 @@ static int create_file_r(const char* path)
 
     name = xstr_new(256);
     // create dirs
-    while (p = strchr(path, '/')) {
+    while ((p = strchr(path, '/')) != NULL) {
         xstr_append(name, path, ++p - path);
         r = mkdir(xstr_data(name), 0755);
         path = p;
@@ -162,15 +163,47 @@ static void proccess_files(options_t* o, int flag)
     scp_session_close(session);
 }
 
+#define CONFIG_TEMPLATE                                 \
+    "{\n"                                               \
+    "    \"remote_host\": \"192.168.1.1\",\n"           \
+    "    \"remote_port\": 22,\n"                        \
+    "    \"remote_user\": \"root\",\n"                  \
+    "    \"remote_passwd\": \"123456\",\n"              \
+    "    \"remote_path\": \"/tmp/test\",\n"             \
+    "    \"local_files\": [\n"                          \
+    "        \"*.c\", \"*.h\", \".vscode/*.json\"\n"    \
+    "    ],\n\n"                                        \
+    "    \"local_path\": \".\",\n"                      \
+    "    \"stats_path\": \"/tmp/.stats\"\n"             \
+    "}\n"
+static int generate_config_file(const char* file)
+{
+    int fd = open(file, O_WRONLY | O_CREAT | O_EXCL, 0644);
+
+    if (fd < 0) {
+        fprintf(stderr, "failed open file [%s]: %s.\n", file, strerror(errno));
+        return -1;
+    }
+
+    fprintf(stdout, "write template config file to [%s].\n", file);
+    if (write(fd, CONFIG_TEMPLATE, sizeof(CONFIG_TEMPLATE) - 1) < 0) {
+        fprintf(stderr, "write failed.\n");
+    }
+    close(fd);
+    return 0;
+}
+#undef CONFIG_TEMPLATE
+
 static void usage(const char* name)
 {
     fprintf(stderr, "usage: %s [option]\n"
-        "\t-l      - list the files to be uploaded.\n"
-        "\t-a      - list all matched file.\n"
-        "\t-u      - upload the files to be uploaded.\n"
-        "\t-i      - create all stat files.\n"
-        "\t-c      - remove all stat files.\n"
-        "\t-f file - set config file. (default: " DEFAULT_CONFIG_FILE ")\n", name);
+        "    -l      - list the files to be uploaded.\n"
+        "    -a      - list all matched file.\n"
+        "    -u      - upload the files to be uploaded.\n"
+        "    -i      - create all stat files.\n"
+        "    -c      - remove all stat files.\n"
+        "    -t      - generate template config file.\n"
+        "    -f file - set config file. (default: " DEFAULT_CONFIG_FILE ")\n", name);
 }
 
 extern char* optarg;
@@ -182,7 +215,7 @@ int main(int argc, char** argv)
     int flag = 0;
     int c;
 
-    while ((c = getopt(argc, argv, "lauicf:")) != -1) {
+    while ((c = getopt(argc, argv, "lauictf:")) != -1) {
         switch (c)
         {
         case 'l': flag = FLAG_LIST_UPLOAD; break;
@@ -190,6 +223,7 @@ int main(int argc, char** argv)
         case 'u': flag = FLAG_DO_UPLOAD  ; break;
         case 'i': flag = FLAG_DO_INIT    ; break;
         case 'c': flag = FLAG_DO_CLEAN   ; break;
+        case 't': flag = FLAG_GEN_CONFIG ; break;
         case 'f': cfg_file = optarg      ; break;
         default:
             usage(argv[0]);
@@ -199,6 +233,10 @@ int main(int argc, char** argv)
     if (!flag) {
         usage(argv[0]);
         return 1;
+    }
+    if (flag & FLAG_GEN_CONFIG) {
+        generate_config_file(cfg_file);
+        return 0;
     }
 
     opts = config_load(cfg_file);

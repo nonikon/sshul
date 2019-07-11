@@ -204,8 +204,8 @@ options_t* config_load(const char* file)
         free(buf);
         return NULL;
     }
-    if (fread(buf, 1, len, fp) < 0) {
-        fprintf(stderr, "unable to read config file [%s].\n", file);
+    if (fread(buf, 1, len, fp) != len) {
+        fprintf(stderr, "failed to read config file [%s].\n", file);
         fclose(fp);
         free(buf);
         return NULL;
