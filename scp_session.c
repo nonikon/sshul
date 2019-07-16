@@ -63,7 +63,7 @@ int scp_session_send_file(
     struct stat f;
     FILE* fp;
     char buf[4096];
-    int r;
+    int nr, nw = -1;
 
     if (stat(local, &f) != 0) {
         fprintf(stderr, "can't stat file [%s].\n", local);
@@ -79,11 +79,14 @@ int scp_session_send_file(
 
     fp = fopen(local, "r");
     if (fp) {
-        while ((r = fread(buf, 1, sizeof(buf), fp)) > 0) {
-            if (r > 0
-                && libssh2_channel_write(channel, buf, r) != r) {
+        while ((nr = fread(buf, 1, sizeof(buf), fp)) > 0) {
+            nw = libssh2_channel_write(channel, buf, nr);
+            if (nw < 0) {
                 fprintf(stderr, "send file [%s] failed.\n", local);
                 break;
+            }
+            if (nw != nr) {
+                fprintf(stderr, "warn: read %d, write %d.\n", nr, nw);
             }
         }
         fclose(fp);
@@ -94,7 +97,7 @@ int scp_session_send_file(
     libssh2_channel_wait_closed(channel);
     libssh2_channel_free(channel);
 
-    return 0;
+    return nw > 0 ? 0 : -1;
 }
 
 void scp_session_close(scp_session_t* s)
