@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -6,6 +7,8 @@
 #include <arpa/inet.h>
 
 #include "scp_session.h"
+
+#define READ_BUF_SIZE   8192
 
 scp_session_t* scp_session_open(
     const char* host, int port, const char* user, const char* passwd)
@@ -62,7 +65,8 @@ int scp_session_send_file(
     LIBSSH2_CHANNEL* channel;
     struct stat f;
     FILE* fp;
-    char buf[4096];
+    char* errmsg;
+    char* buf;
     int nr, nw = -1;
 
     if (stat(local, &f) != 0) {
@@ -73,22 +77,27 @@ int scp_session_send_file(
     channel = libssh2_scp_send(s, remote,
         f.st_mode & 0777, (unsigned long)f.st_size);
     if (!channel) {
-        fprintf(stderr, "can't open channel for [%s].\n", local);
+        libssh2_session_last_error(s, &errmsg, NULL, 0);
+        fprintf(stderr, "can't open channel for [%s]: %s.\n", local, errmsg);
         return -1;
     }
 
     fp = fopen(local, "r");
     if (fp) {
-        while ((nr = fread(buf, 1, sizeof(buf), fp)) > 0) {
+        buf = malloc(READ_BUF_SIZE);
+        while ((nr = fread(buf, 1, READ_BUF_SIZE, fp)) > 0) {
             nw = libssh2_channel_write(channel, buf, nr);
             if (nw < 0) {
-                fprintf(stderr, "send file [%s] failed.\n", local);
+                libssh2_session_last_error(s, &errmsg, NULL, 0);
+                fprintf(stderr, "send file [%s] failed: %s.\n", local, errmsg);
                 break;
             }
             if (nw != nr) {
-                fprintf(stderr, "warn: read %d, write %d.\n", nr, nw);
+                libssh2_session_last_error(s, &errmsg, NULL, 0);
+                fprintf(stderr, "warn: read %d, write %d: %s.\n", nr, nw, errmsg);
             }
         }
+        free(buf);
         fclose(fp);
     }
 

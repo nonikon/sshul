@@ -1,1 +1,1 @@
-# scpul
+# file(s) uploader, using 'scp' or 'sftp' protocol.

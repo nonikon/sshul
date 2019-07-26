@@ -11,7 +11,7 @@
 #include "config.h"
 #include "scp_session.h"
 
-#define DEFAULT_CONFIG_FILE "scpul.json"
+#define DEFAULT_CONFIG_FILE "sshul.json"
 
 #define FLAG_LIST_ALL       0x01 // list all matched file
 #define FLAG_LIST_UPLOAD    0x02 // list the files to be uploaded

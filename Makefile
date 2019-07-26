@@ -1,6 +1,6 @@
 # MAKE_VERSION = debug
 MAKE_VERSION = release
-TARGET = scpul
+TARGET = sshul
 INSTALL_PATH = /usr/local/bin
 
 CC = gcc
