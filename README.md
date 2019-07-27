@@ -1,1 +1,1 @@
-# file(s) uploader, using 'scp' or 'sftp' protocol.
+# ssh uploader

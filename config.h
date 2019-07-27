@@ -15,6 +15,7 @@ typedef struct options
     xlist_t* local_files; // element type 'xstr_t*'
     xstr_t*  local_path;
     xstr_t*  stats_path;
+    int      use_sftp;
 } options_t;
 
 options_t* config_load(const char* file);

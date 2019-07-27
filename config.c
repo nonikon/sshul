@@ -25,6 +25,7 @@ static options_t* options_new()
 
     o->local_path = xstr_new(128);
     o->stats_path = xstr_new(128);
+    o->use_sftp = 1; // default use 'sftp'
     o->local_files = xlist_new(sizeof(xstr_t*), _on_xstr_free);
 
     xstr_append(o->local_path,
@@ -99,35 +100,40 @@ static int set_options(options_t* o, json_value* jobj)
             }
             xstr_assign(o->remote_user,
                 json_get_string(value), json_get_string_length(value));
-        } else if (!strcmp(name, "remote_passwd")){
+        } else if (!strcmp(name, "remote_passwd")) {
             if (json_get_type(value) != json_string) {
                 return -1;
             }
             xstr_assign(o->remote_passwd,
                 json_get_string(value), json_get_string_length(value));
-        } else if (!strcmp(name, "remote_path")){
+        } else if (!strcmp(name, "remote_path")) {
             if (json_get_type(value) != json_string) {
                 return -1;
             }
             xstr_assign(o->remote_path,
                 json_get_string(value), json_get_string_length(value));
-        } else if (!strcmp(name, "local_files")){
+        } else if (!strcmp(name, "local_files")) {
             if (json_get_type(value) != json_array) {
                 return -1;
             }
             set_option_local_files(o->local_files, value);
-        } else if (!strcmp(name, "local_path")){
+        } else if (!strcmp(name, "local_path")) {
             if (json_get_type(value) != json_string) {
                 return -1;
             }
             xstr_assign(o->local_path,
                 json_get_string(value), json_get_string_length(value));
-        } else if (!strcmp(name, "stats_path")){
+        } else if (!strcmp(name, "stats_path")) {
             if (json_get_type(value) != json_string) {
                 return -1;
             }
             xstr_assign(o->stats_path,
                 json_get_string(value), json_get_string_length(value));
+        } else if (!strcmp(name, "use_sftp")) {
+            if (json_get_type(value) != json_boolean) {
+                return -1;
+            }
+            o->use_sftp = json_get_bool(value);
         }
     }
 

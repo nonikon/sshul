@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 
 #include "config.h"
-#include "scp_session.h"
+#include "ssh_session.h"
 
 #define DEFAULT_CONFIG_FILE "sshul.json"
 
@@ -82,7 +82,9 @@ static void expand_files(xlist_t* files)
 static void proccess_files(options_t* o, int flag)
 {
     xlist_iter_t iter = xlist_begin(o->local_files);
-    scp_session_t* session = NULL;
+    ssh_session_t* ssh = NULL;
+    sftp_session_t* sftp = NULL;
+
     struct stat curr;
     struct stat befo;
     xstr_t* local_f;
@@ -90,27 +92,33 @@ static void proccess_files(options_t* o, int flag)
     xstr_t* stat_f;
 
     if (flag & FLAG_DO_UPLOAD) {
-        session = scp_session_open(
+        ssh = ssh_session_open(
             xstr_data(o->remote_host), o->remote_port,
             xstr_data(o->remote_user), xstr_data(o->remote_passwd));
-        if (!session) return;
+        if (!ssh) {
+            return;
+        }
+        if (o->use_sftp) {
+            sftp = sftp_session_new(ssh);
+            if (!sftp) {
+                fprintf(stderr, "sftp_session_new failed, use scp instead.");
+            }
+        }
     }
 
     remote_f = xstr_new(128);
-    xstr_append(remote_f, xstr_data(o->remote_path), xstr_size(o->remote_path));
+    xstr_append_str(remote_f, o->remote_path);
     xstr_push_back(remote_f, '/');
 
     stat_f = xstr_new(128);
-    xstr_append(stat_f, xstr_data(o->stats_path), xstr_size(o->stats_path));
+    xstr_append_str(stat_f, o->stats_path);
     xstr_push_back(stat_f, '/');
 
     for (; xlist_iter_valid(o->local_files, iter); iter = xlist_iter_next(iter)) {
         local_f = *(xstr_t**)xlist_iter_value(iter);
 
-        xstr_append_at(remote_f,
-            xstr_size(o->remote_path) + 1, xstr_data(local_f), xstr_size(local_f));
-        xstr_append_at(stat_f,
-            xstr_size(o->stats_path) + 1, xstr_data(local_f), xstr_size(local_f));
+        xstr_append_str_at(remote_f, xstr_size(o->remote_path) + 1, local_f);
+        xstr_append_str_at(stat_f, xstr_size(o->stats_path) + 1, local_f);
 
         stat(xstr_data(local_f), &curr); // no need to check it's return value
         if (S_ISDIR(curr.st_mode)) {
@@ -119,39 +127,38 @@ static void proccess_files(options_t* o, int flag)
 
         if (flag & FLAG_LIST_ALL) {
             fprintf(stdout, "%s\n", xstr_data(local_f));
-        }
-        else if (flag & FLAG_DO_CLEAN) {
+        } else if (flag & FLAG_DO_CLEAN) {
             fprintf(stdout, "rmstat [%s].\n", xstr_data(stat_f));
             unlink(xstr_data(stat_f));
-        }
-        else if (stat(xstr_data(stat_f), &befo) != 0) {
+        } else if (stat(xstr_data(stat_f), &befo) != 0) {
             if (flag & FLAG_LIST_UPLOAD) {
                 fprintf(stdout, "%s\n", xstr_data(local_f));
-            }
-            else if (flag & FLAG_DO_INIT) {
+            } else if (flag & FLAG_DO_INIT) {
                 fprintf(stdout, "stat [%s].\n", xstr_data(local_f));
                 create_file_r(xstr_data(stat_f));
-            }
-            else if (flag & FLAG_DO_UPLOAD) {
+            } else if (flag & FLAG_DO_UPLOAD) {
                 fprintf(stdout, "upload [%s].\n", xstr_data(local_f));
-                if (scp_session_send_file(session,
-                        xstr_data(local_f), xstr_data(remote_f)) != -1) {
+                if (-1 != (sftp
+                    ? sftp_send_file(sftp,
+                        xstr_data(local_f), xstr_data(remote_f))
+                    : scp_send_file(ssh,
+                        xstr_data(local_f), xstr_data(remote_f)))) {
                     create_file_r(xstr_data(stat_f));
                 }
             }
-        }
-        else if (curr.st_mtime > befo.st_mtime) {
+        } else if (curr.st_mtime > befo.st_mtime) {
             if (flag & FLAG_LIST_UPLOAD) {
                 fprintf(stdout, "%s\n", xstr_data(local_f));
-            }
-            else if (flag & FLAG_DO_INIT) {
+            } else if (flag & FLAG_DO_INIT) {
                 fprintf(stdout, "stat [%s].\n", xstr_data(local_f));
                 utime(xstr_data(stat_f), NULL);
-            }
-            else if (flag & FLAG_DO_UPLOAD) {
+            } else if (flag & FLAG_DO_UPLOAD) {
                 fprintf(stdout, "upload [%s].\n", xstr_data(local_f));
-                if (scp_session_send_file(session,
-                        xstr_data(local_f), xstr_data(remote_f)) != -1) {
+                if (-1 != (sftp
+                    ? sftp_send_file(sftp,
+                        xstr_data(local_f), xstr_data(remote_f))
+                    : scp_send_file(ssh,
+                        xstr_data(local_f), xstr_data(remote_f)))) {
                     utime(xstr_data(stat_f), NULL);
                 }
             }
@@ -160,7 +167,8 @@ static void proccess_files(options_t* o, int flag)
 
     xstr_free(remote_f);
     xstr_free(stat_f);
-    scp_session_close(session);
+    sftp_session_free(sftp);
+    ssh_session_close(ssh);
 }
 
 #define CONFIG_TEMPLATE                                 \
@@ -175,6 +183,7 @@ static void proccess_files(options_t* o, int flag)
     "    ],\n\n"                                        \
     "    \"local_path\": \".\",\n"                      \
     "    \"stats_path\": \"/tmp/.stats\"\n"             \
+    "    \"use_sftp\": true\n"                          \
     "}\n"
 static int generate_config_file(const char* file)
 {
