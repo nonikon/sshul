@@ -101,7 +101,7 @@ static void proccess_files(options_t* o, int flag)
         if (o->use_sftp) {
             sftp = sftp_session_new(ssh);
             if (!sftp) {
-                fprintf(stderr, "sftp_session_new failed, use scp instead.");
+                fprintf(stderr, "sftp_session_new failed, use scp instead.\n");
             }
         }
     }
