@@ -89,6 +89,7 @@ int sftp_send_file(sftp_session_t* s, const char* local, const char* remote)
     struct stat f;
     FILE* fp;
     char* buf;
+    char* pos;
     int nr, nw = -1;
 
     if (stat(local, &f) != 0) {
@@ -110,13 +111,24 @@ int sftp_send_file(sftp_session_t* s, const char* local, const char* remote)
     if (fp) {
         buf = malloc(READ_BUF_SIZE);
 
-        while ((nr = fread(buf, 1, READ_BUF_SIZE, fp)) > 0) {
-            nw = libssh2_sftp_write(hdl, buf, nr);
+        while (1) {
+            nr = fread(buf, 1, READ_BUF_SIZE, fp);
 
-            if (nw != nr) {
-                fprintf(stderr, "ssh2_sftp_write failed [%d/%d]: code %d.\n",
-                    nw, nr, (int)libssh2_sftp_last_error(s));
+            if (nr <= 0) {
                 break;
+            }
+            pos = buf;
+
+            while (nr > 0) {
+                nw = libssh2_sftp_write(hdl, buf, nr);
+
+                if (nw < 0) {
+                    fprintf(stderr, "ssh2_sftp_write failed [%d/%d]: code %d.\n",
+                        nw, nr, (int)libssh2_sftp_last_error(s));
+                    break;
+                }
+                nr -= nw;
+                pos += nw;
             }
         }
         free(buf);
@@ -140,6 +152,7 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
     FILE* fp;
     char* errmsg;
     char* buf;
+    char* pos;
     int nr, nw = -1;
 
     if (stat(local, &f) != 0) {
@@ -159,13 +172,25 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
     if (fp) {
         buf = malloc(READ_BUF_SIZE);
 
-        while ((nr = fread(buf, 1, READ_BUF_SIZE, fp)) > 0) {
-            nw = libssh2_channel_write(ch, buf, nr);
+        while (1) {
+            nr = fread(buf, 1, READ_BUF_SIZE, fp);
 
-            if (nw != nr) {
-                libssh2_session_last_error(s, &errmsg, NULL, 0);
-                fprintf(stderr, "ssh2_channel_write failed [%d/%d]: %s.\n", nw, nr, errmsg);
+            if (nr <= 0) {
                 break;
+            }
+            pos = buf;
+
+            while (nr > 0)
+            {
+                nw = libssh2_channel_write(ch, pos, nr);
+
+                if (nw < 0) {
+                    libssh2_session_last_error(s, &errmsg, NULL, 0);
+                    fprintf(stderr, "ssh2_channel_write failed [%d/%d]: %s.\n", nw, nr, errmsg);
+                    break;
+                }
+                nr -= nw;
+                pos += nw;
             }
         }
         free(buf);

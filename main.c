@@ -182,7 +182,7 @@ static void proccess_files(options_t* o, int flag)
     "        \"*.c\", \"*.h\", \".vscode/*.json\"\n"    \
     "    ],\n\n"                                        \
     "    \"local_path\": \".\",\n"                      \
-    "    \"stats_path\": \"/tmp/.stats\"\n"             \
+    "    \"stats_path\": \"/tmp/.stats\",\n"            \
     "    \"use_sftp\": true\n"                          \
     "}\n"
 static int generate_config_file(const char* file)
