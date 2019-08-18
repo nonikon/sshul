@@ -90,6 +90,7 @@ int sftp_send_file(sftp_session_t* s, const char* local, const char* remote)
     FILE* fp;
     char* buf;
     char* pos;
+    int retried = 0;
     int nr, nw = -1;
 
     if (stat(local, &f) != 0) {
@@ -97,14 +98,53 @@ int sftp_send_file(sftp_session_t* s, const char* local, const char* remote)
         return -1;
     }
 
+retry:
     hdl = libssh2_sftp_open(s, remote,
             LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
             f.st_mode & 0777);
     if (!hdl) {
-        fprintf(stderr, "ssh2_sftp_open failed: code %d.\n",
-            (int)libssh2_sftp_last_error(s));
-        // create dir when code = 2, todo
-        return -1;
+        if (retried) {
+            return -1;
+        }
+        if (libssh2_sftp_last_error(s) != LIBSSH2_FX_NO_SUCH_FILE) {
+            fprintf(stderr, "ssh2_sftp_open failed: code %d, retried = %d.\n",
+                (int)libssh2_sftp_last_error(s), retried);
+            return -1;
+        }
+
+        pos = strrchr(remote, '/');
+        if (pos <= remote) {
+            fprintf(stderr, "can't create remote file: %s.\n", remote);
+            return -1;
+        }
+
+        buf = malloc(pos - remote + 2);
+        memcpy(buf, remote, pos - remote + 1);
+        buf[pos - remote + 1] = '\0';
+
+        pos = strchr(buf + 1, '/');
+        // create dirs recursively
+        for (LIBSSH2_SFTP_ATTRIBUTES attrs; pos; pos = strchr(pos + 1, '/')) {
+            pos[0] = '\0';
+
+            if (libssh2_sftp_lstat(s, buf, &attrs) < 0) { // not exist, create it
+                if (libssh2_sftp_mkdir(s, buf, 0755) < 0) {
+                    fprintf(stderr, "create remote dir [%s] failed: code %d.\n",
+                        buf, (int)libssh2_sftp_last_error(s));
+                    break;
+                }
+            }
+            else if (!LIBSSH2_SFTP_S_ISDIR(attrs.permissions)) { // exist but not a directory
+                fprintf(stderr, "create remote dir [%s] failed: file exist.\n", buf);
+                break;
+            }
+    
+            pos[0] = '/';
+        }
+        free(buf);
+
+        retried = 1;
+        goto retry;
     }
 
     fp = fopen(local, "r");
@@ -138,11 +178,6 @@ int sftp_send_file(sftp_session_t* s, const char* local, const char* remote)
     libssh2_sftp_close_handle(hdl);
 
     return nw > 0 ? 0 : -1;
-}
-
-int sftp_make_dir(sftp_session_t* s, const char* remote)
-{
-    return libssh2_sftp_mkdir(s, remote, 0755);
 }
 
 int scp_send_file(ssh_session_t* s, const char* local, const char* remote)

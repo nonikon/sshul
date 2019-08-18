@@ -16,9 +16,7 @@ void sftp_session_free(sftp_session_t* s); // 's' can be NULL
 
 // upload a file via SCP.
 int scp_send_file(ssh_session_t* s, const char* local, const char* remote);
-// upload a file via SFTP.
+// upload a file via SFTP (auto create missing dirs).
 int sftp_send_file(sftp_session_t* s, const char* local, const char* remote);
-// create a directory SFTP.
-int sftp_make_dir(sftp_session_t* s, const char* remote);
 
 #endif // _SSH_SESSION_H_
