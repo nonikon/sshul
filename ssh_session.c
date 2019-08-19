@@ -151,7 +151,7 @@ retry:
     if (fp) {
         buf = malloc(READ_BUF_SIZE);
 
-        while (1) {
+        do {
             nr = fread(buf, 1, READ_BUF_SIZE, fp);
 
             if (nr <= 0) {
@@ -159,8 +159,8 @@ retry:
             }
             pos = buf;
 
-            while (nr > 0) {
-                nw = libssh2_sftp_write(hdl, buf, nr);
+            do {
+                nw = libssh2_sftp_write(hdl, pos, nr);
 
                 if (nw < 0) {
                     fprintf(stderr, "ssh2_sftp_write failed [%d/%d]: code %d.\n",
@@ -170,7 +170,10 @@ retry:
                 nr -= nw;
                 pos += nw;
             }
+            while (nr > 0);
         }
+        while (1);
+
         free(buf);
         fclose(fp);
     }
@@ -207,7 +210,7 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
     if (fp) {
         buf = malloc(READ_BUF_SIZE);
 
-        while (1) {
+        do {
             nr = fread(buf, 1, READ_BUF_SIZE, fp);
 
             if (nr <= 0) {
@@ -215,8 +218,7 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
             }
             pos = buf;
 
-            while (nr > 0)
-            {
+            do {
                 nw = libssh2_channel_write(ch, pos, nr);
 
                 if (nw < 0) {
@@ -227,7 +229,10 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
                 nr -= nw;
                 pos += nw;
             }
+            while (nr > 0);
         }
+        while (1);
+
         free(buf);
         fclose(fp);
     }
