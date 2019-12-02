@@ -5,22 +5,26 @@
 
 /* doubly-linked list, similar to C++ STL std::list */
 
+typedef struct xlist       xlist_t;
+typedef struct xlist_node  xlist_node_t;
+typedef struct xlist_node* xlist_iter_t;
+
 typedef void (*xlist_destroy_cb)(void* pvalue);
 
-typedef struct xlist_node
+struct xlist_node
 {
     struct xlist_node* prev;
     struct xlist_node* next;
     // char value[0];
-} xlist_node_t, *xlist_iter_t;
+};
 
-typedef struct xlist
+struct xlist
 {
     size_t size;
     size_t val_size;        // element value size in 'xlist_node_t'
     xlist_destroy_cb destroy_cb;    // called when element destroy
     xlist_node_t head;
-} xlist_t;
+};
 
 /* allocate memory for a 'xlist_t', 'val_size' is the size of element value.
    'cb' is called when element destroy, can be NULL, but it usually can't be NULL
@@ -66,6 +70,16 @@ xlist_iter_t xlist_erase(xlist_t* xl, xlist_iter_t iter);
    if 'pvalue' is NULL, leave value uninitialized. then, set it by yourself.
    return an iterator pointing to the inserted element. */
 xlist_iter_t xlist_insert(xlist_t* xl, xlist_iter_t iter, const void* pvalue);
+/* cut the element at 'iter', 'iter' MUST be valid.
+   return a pointer pointed to the element value.
+   'xlist_cut_free()' OR 'xlist_paste()' MUST be called for the return value. */
+void* xlist_cut(xlist_t* xl, xlist_iter_t iter);
+/* destory an element which 'xlist_cut' returns ('xlist_destroy_cb' will be called). */
+void xlist_cut_free(xlist_t* xl, void* pvalue);
+/* paste an element (which 'xlist_cut' returns) to 'xl' BEFORE 'iter'.
+   return a iterator pointed to the 'pvalue'.
+   'xl' element type MUST equal to the 'pvalue' type. */
+xlist_iter_t xlist_paste(xlist_t* xl, xlist_iter_t iter, void* pvalue);
 /* clears the elements in a 'xlist_t'. */
 void xlist_clear(xlist_t* xl);
 
@@ -80,5 +94,13 @@ void xlist_clear(xlist_t* xl);
 #define xlist_pop_front(xl)             xlist_erase(xl, xlist_begin(xl))
 /* removes the last element. see 'xlist_erase'. */
 #define xlist_pop_back(xl)              xlist_erase(xl, xlist_rbegin(xl))
+/* cut the first element. see 'xlist_cut'. */
+#define xlist_cut_front(xl)             xlist_cut(xl, xlist_begin(xl))
+/* cut the last element. see 'xlist_cut'. */
+#define xlist_cut_back(xl)              xlist_cut(xl, xlist_rbegin(xl))
+/* paste an element to the beginning. see 'xlist_paste'. */
+#define xlist_paste_front(xl, pvalue)   xlist_paste(xl, xlist_begin(xl), pvalue)
+/* paste an element to the end. see 'xlist_paste'. */
+#define xlist_paste_back(xl, pvalue)    xlist_paste(xl, xlist_end(xl), pvalue)
 
 #endif // _XLIST_H_

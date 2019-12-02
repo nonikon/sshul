@@ -9,23 +9,22 @@
 #define XSTR_DEFAULT_CAPACITY    36
 #endif
 
-// #ifdef UNICODE
-// typedef wchar_t xchar;
-// #else
-typedef char xchar;
-// #endif
+typedef struct xstr xstr_t;
 
-typedef struct xstr
+// typedef wchar_t xchar;
+typedef char xchar;
+
+struct xstr
 {
     xchar* data;
     size_t size;
     size_t capacity;
-} xstr_t;
+};
 
 /* allocate memory for a string with initial capacity. */
 xstr_t* xstr_new(size_t capacity);
 /* allocate memory for a string and initialize with 'cstr'. 'size' can be <= 0. */
-xstr_t* xstr_new_with(const char* cstr, int size);
+xstr_t* xstr_new_with(const xchar* cstr, int size);
 /* release memory for a string. */
 void xstr_free(xstr_t* xs);
 
@@ -67,7 +66,10 @@ void xstr_erase(xstr_t* xs, int pos, int count);
     xstr_append_at(dest, pos, xstr_data(src), xstr_size(src))
 /* assign 'xstr' to a string. */
 #define xstr_assgin_str(dest, src) \
-    xstr_assgin(dest, xstr_data(src), xstr_size(src))
+    xstr_assign(dest, xstr_data(src), xstr_size(src))
+
+extern const char g_xstr_i2c_table[];
+extern const char g_xstr_c2i_table[];
 
 /*
  * unsigned int -> string, return a pointer pointed to 'buf'.
@@ -81,15 +83,23 @@ char* uitoa(char* buf, unsigned int val, int radix);
 /*
  * unsigned char -> hex string, return a pointer pointed to 'buf'.
  */
-char* uctoa_hex(char buf[2], unsigned char val);
+static inline void uctoa_hex(char buf[2], unsigned char val)
+{
+    buf[0] = g_xstr_i2c_table[val >> 4];
+    buf[1] = g_xstr_i2c_table[val & 15];
+}
 /*
  * string -> unsigned int.
  * base: 2 ~ 36.
  */
-unsigned int atoui(const char* str, int slen, int base);
+unsigned int atoui(const char* str, int base);
 /*
  * hex string -> unsigned char.
  */
-unsigned char atouc_hex(const char str[2]);
+static inline unsigned char atouc_hex(const char str[2])
+{
+    return g_xstr_c2i_table[(unsigned char)str[1]]
+            | (g_xstr_c2i_table[(unsigned char)str[0]] << 4);
+}
 
 #endif // _XSTRING_H_
