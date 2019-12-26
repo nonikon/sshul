@@ -1,29 +1,31 @@
-# MAKE_VERSION = debug
-MAKE_VERSION = release
-TARGET = sshul
-INSTALL_PATH = /usr/local/bin
+# MAKE_VERSION ?= debug
+MAKE_VERSION ?= release
+TARGET ?= sshul
+INSTALL_PATH ?= /usr/local/bin
 
-CC = gcc
-CFLAGS = -Wall
-LDFLAGS = -Wall -lm -lssh2
+CC ?= gcc
+LDFLAGS ?= -lssh2
 
 ifeq ($(MAKE_VERSION), debug)
-CFLAGS += -g -DDEBUG
+_CFLAGS = -g -DDEBUG
 else
-CFLAGS += -O2
+_CFLAGS = -O2
 endif
 
-SRCS = $(wildcard *.c)
-OBJS = $(SRCS:.c=.o)
+_CFLAGS += -Wall $(CFLAGS)
+_LDFLAGS += -Wall $(LDFLAGS)
+
+OBJS = main.o config.o ssh_session.o \
+	json.o xlist.o xstring.o
 
 all : $(TARGET)
 
 $(TARGET) : $(OBJS)
 	@echo "\tLD $@"
-	@$(CC) -o $@ $^ $(LDFLAGS)
+	@$(CC) -o $@ $^ -lm $(_LDFLAGS)
 $(OBJS) : %.o : %.c
 	@echo "\tCC $@"
-	@$(CC) -c $< -o $@ $(CFLAGS)
+	@$(CC) -c $< -o $@ $(_CFLAGS)
 
 .PHONY : install uninstall clean
 
