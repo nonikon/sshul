@@ -16,7 +16,7 @@ case $CRYPTO in
         LINKFLAGS="-lgcrypt"
         ;;
     mbedTLS)
-        LINKFLAGS="-lmbedtls"
+        LINKFLAGS="-lmbedcrypto"
         ;;
     *)
         echo "unsupported crypto \"$CRYPTO\""
@@ -59,7 +59,7 @@ if [ ! -f libssh2.a ]; then
     cd ..
     mv build/src/libssh2.a .
     # automake
-:<<!
+<<!
     echo "use automake to build libssh2"
     ./buildconf
     if [ $? -ne 0 ]; then
