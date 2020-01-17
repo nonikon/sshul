@@ -117,8 +117,8 @@ static void proccess_files(options_t* o, int flag)
     for (; xlist_iter_valid(o->local_files, iter); iter = xlist_iter_next(iter)) {
         local_f = *(xstr_t**)xlist_iter_value(iter);
 
-        xstr_append_str_at(remote_f, xstr_size(o->remote_path) + 1, local_f);
-        xstr_append_str_at(stat_f, xstr_size(o->stats_path) + 1, local_f);
+        xstr_assign_str_at(remote_f, xstr_size(o->remote_path) + 1, local_f);
+        xstr_assign_str_at(stat_f, xstr_size(o->stats_path) + 1, local_f);
 
         stat(xstr_data(local_f), &curr); // no need to check it's return value
         if (S_ISDIR(curr.st_mode)) {

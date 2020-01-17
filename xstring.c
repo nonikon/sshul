@@ -4,7 +4,7 @@
 #include "xstring.h"
 
 #define need_expand(xs, sz) \
-                (xs)->size + sz + 1 > (xs)->capacity /* leave 1 null-terminated */
+            (xs)->size + sz + 1 > (xs)->capacity /* leave 1 null-terminated */
 
 static int capacity_expand(xstr_t* xs, size_t size)
 {
@@ -15,48 +15,70 @@ static int capacity_expand(xstr_t* xs, size_t size)
 
     if (new_cap < size) new_cap = size;
 
-    new_data = realloc(xs->data, new_cap * sizeof(xchar));
+    new_data = realloc(xs->data, new_cap);
 
-    if (!new_data) return -1;
-    
-    xs->data = (xchar*)new_data;
-    xs->capacity = new_cap;
-    return 0;
+    if (new_data)
+    {
+        xs->data = new_data;
+        xs->capacity = new_cap;
+        return 0;
+    }
+
+    return -1;
 }
 
-xstr_t* xstr_new(size_t capacity)
+xstr_t* xstr_new(int capacity)
 {
     xstr_t* r = malloc(sizeof(xstr_t));
 
     if (r)
     {
-        r->size = 0;
-        r->capacity = capacity > 0 ? capacity : XSTR_DEFAULT_CAPACITY;
-        r->data = malloc(r->capacity * sizeof(xchar));
-        r->data[0] = (xchar)'\0';
+        r->capacity = capacity > 0
+                ? capacity : XSTR_DEFAULT_CAPACITY;
+        r->data = malloc(r->capacity);
+
+        if (r->data)
+        {
+            r->size = 0;
+            r->data[0] = '\0';
+            return r;
+        }
+
+        free(r);
+        return NULL;
     }
 
-    return r;
+    return NULL;
 }
 
-xstr_t* xstr_new_with(const xchar* cstr, int size)
+xstr_t* xstr_new_with(const char* cstr, int size)
 {
-    xstr_t* r = malloc(sizeof(xstr_t));
+    xstr_t* r;
+
+    if (size < 0)
+        for (size = 0; cstr[size]; ++size) { }
+
+    r = malloc(sizeof(xstr_t));
 
     if (r)
     {
-        if (size < 0)
-            for (size = 0; cstr[size]; ++size) { }
+        r->data = malloc(size + 1);
 
-        r->size = size;
-        r->capacity = size + 1;
-        r->data = malloc(r->capacity * sizeof(xchar));
-        r->data[size] = (xchar)'\0';
+        if (r->data)
+        {
+            memcpy(r->data, cstr, size);
 
-        memcpy(r->data, cstr, size);
+            r->size = size;
+            r->capacity = size + 1;
+            r->data[size] = '\0';
+            return r;
+        }
+
+        free(r);
+        return NULL;
     }
 
-    return r;
+    return NULL;
 }
 
 void xstr_free(xstr_t* xs)
@@ -71,75 +93,76 @@ void xstr_free(xstr_t* xs)
 void xstr_clear(xstr_t* xs)
 {
     xs->size = 0;
-    xs->data[0] = (xchar)'\0';
+    xs->data[0] = '\0';
 }
 
-void xstr_append(xstr_t* xs, const xchar* cstr, int size)
+void xstr_assign_at(xstr_t* xs, size_t pos, const char* cstr, int size)
 {
-    if (size < 0)
-        for (size = 0; cstr[size]; ++size) { }
-
-    if (need_expand(xs, size)
-        && capacity_expand(xs, size) != 0)
-        return; /* ignore expand failed */
-
-    memcpy(xs->data + xs->size, cstr, size * sizeof(xchar));
-
-    xs->size += size;
-    xs->data[xs->size] = (xchar)'\0';
-}
-
-void xstr_append_at(xstr_t* xs, int pos, const xchar* cstr, int size)
-{
-    if (pos > xs->size) pos = xs->size;
-    else if (pos < 0) pos = 0;
-
     xs->size = pos;
     xstr_append(xs, cstr, size);
 }
 
-void xstr_assign(xstr_t* xs, const xchar* cstr, int size)
+void xstr_append(xstr_t* xs, const char* cstr, int size)
 {
-    xs->size = 0;
-    xstr_append(xs, cstr, size);
+    if (size < 0)
+        for (size = 0; cstr[size]; ++size) { }
+
+    if (need_expand(xs, size))
+        capacity_expand(xs, size); /* ignore expand failed */
+
+    memcpy(xs->data + xs->size, cstr, size);
+
+    xs->size += size;
+    xs->data[xs->size] = '\0';
 }
 
-void xstr_push_back(xstr_t* xs, xchar ch)
+void xstr_insert(xstr_t* xs, size_t pos, const char* cstr, int size)
 {
-    if(need_expand(xs, 1)
-        && capacity_expand(xs, 1) != 0)
-        return; /* ignore expand failed */
+    if (size < 0)
+        for (size = 0; cstr[size]; ++size) { }
+
+    if (need_expand(xs, size))
+        capacity_expand(xs, size); /* ignore expand failed */
+
+    /* >>> */
+    memmove(xs->data + pos + size,
+            xs->data + pos, xs->size - pos);
+
+    memcpy(xs->data + pos, cstr, size);
+
+    xs->size += size;
+    xs->data[xs->size] = '\0';
+}
+
+void xstr_erase(xstr_t* xs, size_t pos, int count)
+{
+    if (count < 0 || pos + count >= xs->size)
+    {
+        xs->size = pos;
+        xs->data[pos] = '\0';
+    }
+    else
+    {
+        xs->size -= count;
+        /* <<< */
+        memmove(xs->data + pos, xs->data + pos + count,
+                xs->size - pos);
+        xs->data[xs->size] = '\0';
+    }
+}
+
+void xstr_push_back(xstr_t* xs, char ch)
+{
+    if(need_expand(xs, 1))
+        capacity_expand(xs, 1); /* ignore expand failed */
 
     xs->data[xs->size++] = ch;
-    xs->data[xs->size] = (xchar)'\0';
+    xs->data[xs->size] = '\0';
 }
 
-xchar xstr_pop_back(xstr_t* xs)
+void xstr_pop_back(xstr_t* xs)
 {
-    xchar c = xs->data[--xs->size];
-
-    xs->data[xs->size] = (xchar)'\0';
-    return c;
-}
-
-void xstr_erase(xstr_t* xs, int pos, int count)
-{
-    int endpos = pos + count;
-
-    if (pos > 0 && pos < xs->size)
-    {
-        if (count < 0 || endpos >= xs->size)
-        {
-            xs->size = pos;
-            xs->data[pos] = (xchar)'\0';
-        }
-        else
-        {
-            memmove(xs->data + pos, xs->data + endpos, xs->size - endpos);
-            xs->size -= count;
-            xs->data[xs->size] = (xchar)'\0';
-        }
-    }
+    xs->data[--xs->size] = '\0';
 }
 
 const char g_xstr_i2c_table[] = {
@@ -171,7 +194,7 @@ char* uitoa(char* buf, unsigned int val, int radix)
     return buf;
 }
 
-const char g_xstr_c2i_table[] = {
+const unsigned char g_xstr_c2i_table[] = {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /*0~15*/
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /*16~31*/
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /*32~47*/
@@ -193,13 +216,14 @@ const char g_xstr_c2i_table[] = {
 unsigned int atoui(const char* str, int base)
 {
     unsigned int acc = 0;
-    int v;
+    unsigned char v;
 
     while (*str)
     {
-        v = g_xstr_c2i_table[(unsigned char)*str++];
+        v = g_xstr_c2i_table
+                [(unsigned char)*str++];
 
-        if (v < 0 || v > base) break;
+        if (v > base) break;
 
         acc = acc * base + v;
     }
