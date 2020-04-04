@@ -82,4 +82,6 @@ cd ..
 make LDFLAGS="$LIBSSH2/libssh2.a $LINKFLAGS" CFLAGS="-I$LIBSSH2/include" \
         MAKE_VERSION="release"
 
+echo "build done, run 'make install' to install"
+
 exit 0

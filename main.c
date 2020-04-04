@@ -20,59 +20,65 @@
 #define FLAG_DO_UPLOAD      0x10 // upload the files to be uploaded
 #define FLAG_GEN_CONFIG     0x20 // generate template config file
 
+/* create an empty file */
 static int create_file(const char* path)
 {
     int r = open(path, O_RDWR | O_CREAT, 0644);
 
-    if (r != -1) {
-        close(r); return 0;
-    }
-    return -1;
+    if (r < 0) return -1;
+
+    close(r);
+    return 0;
 }
 
+/* create an empty file and missing directory */
 static int create_file_r(const char* path)
 {
+    xstr_t name;
     const char* p;
-    xstr_t* name;
     int r = create_file(path);
 
     if (r != 0 && errno != ENOENT) {
         return -1;
     }
 
-    name = xstr_new(256);
-    // create dirs
+    xstr_init(&name, 128);
+
+    /* create missing dirs */
     while ((p = strchr(path, '/')) != NULL) {
-        xstr_append(name, path, ++p - path);
-        r = mkdir(xstr_data(name), 0755);
+        xstr_append(&name, path, ++p - path);
+        r = mkdir(xstr_data(&name), 0755);
         path = p;
     }
-    // create file
-    if (*path) { // 'path' not end with '/'
-        xstr_append(name, path, -1);
-        r = create_file(xstr_data(name));
+
+    /* create file */
+    if (*path) { /* 'path' not end with '/' */
+        xstr_append(&name, path, -1);
+        r = create_file(xstr_data(&name));
     }
-    xstr_free(name);
+
+    xstr_destroy(&name);
 
     return r;
 }
 
 static void expand_files(xlist_t* files)
 {
-    xstr_t* file;
+    xstr_t file;
     xlist_iter_t iter = xlist_begin(files);
     int n = xlist_size(files);
     int i;
     glob_t globbuf;
 
     while (n--) {
-        file = *(xstr_t**)xlist_iter_value(iter);
+        glob(xstr_data((xstr_t*)xlist_iter_value(iter)),
+            GLOB_NOSORT, NULL, &globbuf);
 
-        glob(xstr_data(file), GLOB_NOSORT, NULL, &globbuf);
         for (i = 0; i < globbuf.gl_pathc; ++i) {
-            file = xstr_new_with(globbuf.gl_pathv[i], -1);
+            xstr_init_with(&file, globbuf.gl_pathv[i], -1);
             xlist_push_back(files, &file);
         }
+    
         globfree(&globbuf);
 
         iter = xlist_erase(files, iter);
@@ -81,23 +87,24 @@ static void expand_files(xlist_t* files)
 
 static void proccess_files(options_t* o, int flag)
 {
-    xlist_iter_t iter = xlist_begin(o->local_files);
     ssh_session_t* ssh = NULL;
     sftp_session_t* sftp = NULL;
+    xlist_iter_t iter;
 
-    struct stat curr;
-    struct stat befo;
     xstr_t* local_f;
     xstr_t* remote_f;
     xstr_t* stat_f;
 
+    struct stat curr;
+    struct stat befo;
+
     if (flag & FLAG_DO_UPLOAD) {
         ssh = ssh_session_open(
-            xstr_data(o->remote_host), o->remote_port,
-            xstr_data(o->remote_user), xstr_data(o->remote_passwd));
-        if (!ssh) {
-            return;
-        }
+            xstr_data(&o->remote_host), o->remote_port,
+            xstr_data(&o->remote_user), xstr_data(&o->remote_passwd));
+
+        if (!ssh) return;
+
         if (o->use_sftp) {
             sftp = sftp_session_new(ssh);
             if (!sftp) {
@@ -107,23 +114,28 @@ static void proccess_files(options_t* o, int flag)
     }
 
     remote_f = xstr_new(128);
-    xstr_append_str(remote_f, o->remote_path);
+    xstr_append_str(remote_f, &o->remote_path);
     xstr_push_back(remote_f, '/');
 
     stat_f = xstr_new(128);
-    xstr_append_str(stat_f, o->stats_path);
+    xstr_append_str(stat_f, &o->stats_path);
     xstr_push_back(stat_f, '/');
 
-    for (; xlist_iter_valid(o->local_files, iter); iter = xlist_iter_next(iter)) {
-        local_f = *(xstr_t**)xlist_iter_value(iter);
+    for (iter = xlist_begin(&o->local_files);
+            iter != xlist_end(&o->local_files);
+            iter = xlist_iter_next(iter)) {
 
-        xstr_assign_str_at(remote_f, xstr_size(o->remote_path) + 1, local_f);
-        xstr_assign_str_at(stat_f, xstr_size(o->stats_path) + 1, local_f);
+        local_f = xlist_iter_value(iter);
 
-        stat(xstr_data(local_f), &curr); // no need to check it's return value
-        if (S_ISDIR(curr.st_mode)) {
-            continue; // skip a directory
-        }
+        xstr_assign_str_at(remote_f,
+            xstr_size(&o->remote_path) + 1, local_f);
+        xstr_assign_str_at(stat_f,
+            xstr_size(&o->stats_path) + 1, local_f);
+
+        stat(xstr_data(local_f), &curr); /* no need to check it's return value */
+
+        /* skip a directory */
+        if (S_ISDIR(curr.st_mode)) continue;
 
         if (flag & FLAG_LIST_ALL) {
             fprintf(stdout, "%s\n", xstr_data(local_f));
@@ -138,6 +150,7 @@ static void proccess_files(options_t* o, int flag)
                 create_file_r(xstr_data(stat_f));
             } else if (flag & FLAG_DO_UPLOAD) {
                 fprintf(stdout, "upload [%s].\n", xstr_data(local_f));
+
                 if (-1 != (sftp
                     ? sftp_send_file(sftp,
                         xstr_data(local_f), xstr_data(remote_f))
@@ -154,6 +167,7 @@ static void proccess_files(options_t* o, int flag)
                 utime(xstr_data(stat_f), NULL);
             } else if (flag & FLAG_DO_UPLOAD) {
                 fprintf(stdout, "upload [%s].\n", xstr_data(local_f));
+
                 if (-1 != (sftp
                     ? sftp_send_file(sftp,
                         xstr_data(local_f), xstr_data(remote_f))
@@ -178,26 +192,30 @@ static void proccess_files(options_t* o, int flag)
     "    \"remote_user\": \"root\",\n"                  \
     "    \"remote_passwd\": \"123456\",\n"              \
     "    \"remote_path\": \"/tmp/test\",\n"             \
+    "    \"local_path\": \".\",\n"                      \
     "    \"local_files\": [\n"                          \
     "        \"*.c\", \"*.h\", \".vscode/*.json\"\n"    \
-    "    ],\n\n"                                        \
-    "    \"local_path\": \".\",\n"                      \
+    "    ],\n"                                          \
     "    \"stats_path\": \"/tmp/.stats\",\n"            \
     "    \"use_sftp\": true\n"                          \
     "}\n"
+
 static int generate_config_file(const char* file)
 {
     int fd = open(file, O_WRONLY | O_CREAT | O_EXCL, 0644);
 
     if (fd < 0) {
-        fprintf(stderr, "failed open file [%s]: %s.\n", file, strerror(errno));
+        fprintf(stderr, "failed open file [%s]: %s.\n",
+            file, strerror(errno));
         return -1;
     }
 
     fprintf(stdout, "write template config file to [%s].\n", file);
+
     if (write(fd, CONFIG_TEMPLATE, sizeof(CONFIG_TEMPLATE) - 1) < 0) {
-        fprintf(stderr, "write failed.\n");
+        fprintf(stderr, "write failed: %s.\n", strerror(errno));
     }
+
     close(fd);
     return 0;
 }
@@ -249,27 +267,30 @@ int main(int argc, char** argv)
     }
 
     opts = config_load(cfg_file);
-    if (!opts) {
-        return 1;
-    }
 
-    // cd to config file's path
+    if (!opts) return 1;
+
     char* p = strrchr(cfg_file, '/');
+
+    /* cd to config file's path */
     if (p) {
         char* buf = malloc(p - cfg_file + 1);
         memcpy(buf, cfg_file, p - cfg_file);
         buf[p - cfg_file] = '\0';
+
         if (chdir(buf) != 0) {
             fprintf(stderr, "can't cd to [%s].\n", buf);
         }
         free(buf);
     }
-    // cd to opts->local_path
-    if (chdir(xstr_data(opts->local_path)) != 0) {
-        fprintf(stderr, "can't cd to [%s].\n", xstr_data(opts->local_path));
+
+    /* cd to opts->local_path */
+    if (chdir(xstr_data(&opts->local_path)) != 0) {
+        fprintf(stderr, "can't cd to [%s].\n",
+            xstr_data(&opts->local_path));
     }
 
-    expand_files(opts->local_files);
+    expand_files(&opts->local_files);
     proccess_files(opts, flag);
 
     config_free(opts);

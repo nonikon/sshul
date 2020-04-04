@@ -11,46 +11,55 @@
 
 #define READ_BUF_SIZE   8192
 
-ssh_session_t* ssh_session_open(
-    const char* host, int port, const char* user, const char* passwd)
+static int connect_to_server(const char* host, int port)
 {
-    ssh_session_t* session = NULL;
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in sin;
-    char* errmsg;
-    int sock;
 
-/*
-    if (libssh2_init(0) != 0) {
-        return NULL;
-    } */
-    sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
-        fprintf(stderr, "create socket failed: %s.\n", strerror(errno));
-        return NULL;
+        fprintf(stderr, "create socket failed: %s.\n",
+            strerror(errno));
+        return -1;
     }
 
     sin.sin_family = AF_INET;
     sin.sin_port = htons(port);
+    /* TODO, resolve ip address */
     sin.sin_addr.s_addr = inet_addr(host);
 
-    // todo, resolve ip address
     if(connect(sock, (struct sockaddr*)&sin, sizeof(sin)) != 0) {
-        fprintf(stderr, "connect [%s] failed: %s.\n", host, strerror(errno));
-        goto error;
+        fprintf(stderr, "connect [%s] failed: %s.\n",
+            host, strerror(errno));
+        close(sock);
+        return -1;
     }
 
+    return sock;
+}
+
+ssh_session_t* ssh_session_open(const char* host, int port,
+        const char* user, const char* passwd)
+{
+    ssh_session_t* session;
+    int sock = connect_to_server(host, port);
+    char* errmsg;
+
+    if (sock < 0) return NULL;
+
     session = libssh2_session_init();
-    if (!session) {
-        goto error;
-    }
+
+    if (!session) goto error;
 
     if (libssh2_session_handshake(session, sock)) {
         libssh2_session_last_error(session, &errmsg, NULL, 0);
+
         fprintf(stderr, "ssh2_session_handshake failed: %s.\n", errmsg);
         goto error;
     }
+
     if (libssh2_userauth_password(session, user, passwd)) {
         libssh2_session_last_error(session, &errmsg, NULL, 0);
+
         fprintf(stderr, "ssh2_userauth_password failed: %s.\n",errmsg);
         goto error;
     }
@@ -69,8 +78,6 @@ void ssh_session_close(ssh_session_t* s)
         libssh2_session_disconnect(s, "Normal Shutdown");
         libssh2_session_free(s);
     }
-
-    // libssh2_exit();
 }
 
 sftp_session_t* sftp_session_new(ssh_session_t* s)
@@ -102,10 +109,10 @@ retry:
     hdl = libssh2_sftp_open(s, remote,
             LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
             f.st_mode & 0777);
+
     if (!hdl) {
-        if (retried) {
-            return -1;
-        }
+        if (retried) return -1;
+
         if (libssh2_sftp_last_error(s) != LIBSSH2_FX_NO_SUCH_FILE) {
             fprintf(stderr, "ssh2_sftp_open failed: code %d, retried = %d.\n",
                 (int)libssh2_sftp_last_error(s), retried);
@@ -113,34 +120,40 @@ retry:
         }
 
         pos = strrchr(remote, '/');
+
         if (pos <= remote) {
             fprintf(stderr, "can't create remote file: %s.\n", remote);
             return -1;
         }
 
+        /* /home/user1/file1 -> /home/user1/ */
         buf = malloc(pos - remote + 2);
         memcpy(buf, remote, pos - remote + 1);
         buf[pos - remote + 1] = '\0';
 
         pos = strchr(buf + 1, '/');
-        // create dirs recursively
+
+        /* create missing dirs */
         for (LIBSSH2_SFTP_ATTRIBUTES attrs; pos; pos = strchr(pos + 1, '/')) {
             pos[0] = '\0';
 
-            if (libssh2_sftp_lstat(s, buf, &attrs) < 0) { // not exist, create it
+            if (libssh2_sftp_lstat(s, buf, &attrs) < 0) {
+                /* not exist, create it */
                 if (libssh2_sftp_mkdir(s, buf, 0755) < 0) {
                     fprintf(stderr, "create remote dir [%s] failed: code %d.\n",
                         buf, (int)libssh2_sftp_last_error(s));
                     break;
                 }
             }
-            else if (!LIBSSH2_SFTP_S_ISDIR(attrs.permissions)) { // exist but not a directory
+            else if (!LIBSSH2_SFTP_S_ISDIR(attrs.permissions)) {
+                /* exist but not a directory */
                 fprintf(stderr, "create remote dir [%s] failed: file exist.\n", buf);
                 break;
             }
     
             pos[0] = '/';
         }
+
         free(buf);
 
         retried = 1;
@@ -148,16 +161,15 @@ retry:
     }
 
     fp = fopen(local, "r");
+
     if (fp) {
         buf = malloc(READ_BUF_SIZE);
 
         do {
+            pos = buf;
             nr = fread(buf, 1, READ_BUF_SIZE, fp);
 
-            if (nr <= 0) {
-                break;
-            }
-            pos = buf;
+            if (nr <= 0) break;
 
             do {
                 nw = libssh2_sftp_write(hdl, pos, nr);
@@ -200,6 +212,7 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
 
     ch = libssh2_scp_send(s, remote,
             f.st_mode & 0777, (unsigned long)f.st_size);
+
     if (!ch) {
         libssh2_session_last_error(s, &errmsg, NULL, 0);
         fprintf(stderr, "ssh2_scp_send failed: %s.\n", errmsg);
@@ -207,16 +220,15 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
     }
 
     fp = fopen(local, "r");
+
     if (fp) {
         buf = malloc(READ_BUF_SIZE);
 
         do {
+            pos = buf;
             nr = fread(buf, 1, READ_BUF_SIZE, fp);
 
-            if (nr <= 0) {
-                break;
-            }
-            pos = buf;
+            if (nr <= 0) break;
 
             do {
                 nw = libssh2_channel_write(ch, pos, nr);

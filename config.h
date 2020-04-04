@@ -6,16 +6,15 @@
 
 typedef struct options
 {
-    xstr_t*  remote_host;
-    int      remote_port;
-    xstr_t*  remote_user;
-    xstr_t*  remote_passwd;
-    xstr_t*  remote_path;
-
-    xlist_t* local_files; // element type 'xstr_t*'
-    xstr_t*  local_path;
-    xstr_t*  stats_path;
-    int      use_sftp;
+    xstr_t  remote_host;
+    int     remote_port;
+    xstr_t  remote_user;
+    xstr_t  remote_passwd;
+    xstr_t  remote_path;
+    xstr_t  local_path;
+    xlist_t local_files; // element type 'xstr_t'
+    xstr_t  stats_path;
+    int     use_sftp;
 } options_t;
 
 options_t* config_load(const char* file);

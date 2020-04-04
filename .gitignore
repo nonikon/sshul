@@ -4,3 +4,4 @@ libssh2-*.tar.gz
 *.a
 *.o
 sshul
+sshul.json

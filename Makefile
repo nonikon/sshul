@@ -9,7 +9,7 @@ LDFLAGS ?= -lssh2
 ifeq ($(MAKE_VERSION), debug)
 _CFLAGS = -g -DDEBUG
 else
-_CFLAGS = -O2
+_CFLAGS = -Os -s
 endif
 
 _CFLAGS += -Wall $(CFLAGS)
