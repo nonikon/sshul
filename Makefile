@@ -4,19 +4,19 @@ TARGET ?= sshul
 INSTALL_PATH ?= /usr/local/bin
 
 CC ?= gcc
+CFLAGS ?=
 LDFLAGS ?= -lssh2
 
 ifeq ($(MAKE_VERSION), debug)
-_CFLAGS = -g -DDEBUG
+_CFLAGS = -g -Wall -DDEBUG $(CFLAGS)
+_LDFLAGS = $(LDFLAGS)
 else
-_CFLAGS = -Os -s
+_CFLAGS = -Os -Wall -DNDEBUG $(CFLAGS)
+_LDFLAGS = -s $(LDFLAGS)
 endif
 
-_CFLAGS += -Wall $(CFLAGS)
-_LDFLAGS += -Wall $(LDFLAGS)
-
-OBJS = main.o config.o ssh_session.o \
-	json.o xlist.o xstring.o
+OBJS = main.o config.o db.o ssh_session.o \
+	json.o xlist.o xstring.o xhash.o md5.o
 
 all : $(TARGET)
 

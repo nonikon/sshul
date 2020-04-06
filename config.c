@@ -6,8 +6,6 @@
 #include "json_wrapper.h"
 
 #define CONFIG_FILE_MAXSZ   2048
-#define DEFAULT_LOCAL_PATH  "."
-#define DEFAULT_STATS_PATH  ".stats"
 
 static void _on_xstr_free(void* pvalue)
 {
@@ -24,14 +22,9 @@ static options_t* options_new()
     xstr_init(&o->remote_passwd, 16);
     xstr_init(&o->remote_path, 128);
     xstr_init(&o->local_path, 128);
-    xstr_init(&o->stats_path, 128);
+    xstr_init(&o->db_path, 128);
     o->use_sftp = 1; /* default use 'sftp' */
     xlist_init(&o->local_files, sizeof(xstr_t), _on_xstr_free);
-
-    xstr_append(&o->local_path,
-        DEFAULT_LOCAL_PATH, sizeof(DEFAULT_LOCAL_PATH) - 1);
-    xstr_append(&o->stats_path,
-        DEFAULT_STATS_PATH, sizeof(DEFAULT_STATS_PATH) - 1);
 
     return o;
 }
@@ -45,7 +38,7 @@ static void options_free(options_t* o)
     xstr_destroy(&o->remote_passwd);
     xstr_destroy(&o->remote_path);
     xstr_destroy(&o->local_path);
-    xstr_destroy(&o->stats_path);
+    xstr_destroy(&o->db_path);
     xlist_destroy(&o->local_files);
 
     free(o);
@@ -126,11 +119,11 @@ static int set_options(options_t* o, json_value* jobj)
             }
             xstr_assign(&o->local_path,
                 json_get_string(value), json_get_string_length(value));
-        } else if (!strcmp(name, "stats_path")) {
+        } else if (!strcmp(name, "db_path")) {
             if (json_get_type(value) != json_string) {
                 return -1;
             }
-            xstr_assign(&o->stats_path,
+            xstr_assign(&o->db_path,
                 json_get_string(value), json_get_string_length(value));
         } else if (!strcmp(name, "use_sftp")) {
             if (json_get_type(value) != json_boolean) {
@@ -145,7 +138,39 @@ static int set_options(options_t* o, json_value* jobj)
 
 static int check_options(options_t* o)
 {
-    // TODO
+    if (xstr_empty(&o->remote_host)) {
+        fprintf(stderr, "'remote_host' can't be empty.\n");
+        return -1;
+    }
+    if (o->remote_port < 1 || o->remote_port > 65535) {
+        fprintf(stderr, "wrong 'remote_port': %d.\n", o->remote_port);
+        return -1;
+    }
+    if (xstr_empty(&o->remote_user)) {
+        fprintf(stderr, "'remote_user' can't be empty.\n");
+        return -1;
+    }
+    if (xstr_empty(&o->remote_passwd)) {
+        fprintf(stderr, "'remote_passwd' can't be empty.\n");
+        return -1;
+    }
+    if (xstr_empty(&o->remote_path)) {
+        fprintf(stderr, "'remote_path' can't be empty.\n");
+        return -1;
+    }
+    if (xlist_empty(&o->local_files)) {
+        fprintf(stderr, "'local_files' can't be empty.\n");
+        return -1;
+    }
+    if (xstr_empty(&o->local_path)) {
+        fprintf(stderr, "'local_path' can't be empty.\n");
+        return -1;
+    }
+    if (xstr_empty(&o->db_path)) {
+        fprintf(stderr, "'db_path' can't be empty.\n");
+        return -1;
+    }
+
     return 0;
 }
 
@@ -217,7 +242,7 @@ options_t* config_load(const char* file)
     opts = options_new();
 
     if (set_options(opts, jval) != 0
-        || check_options(opts) != 0) {
+            || check_options(opts) != 0) {
         options_free(opts);
         opts = NULL;
     }

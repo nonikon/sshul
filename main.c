@@ -1,67 +1,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <glob.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <utime.h>
+#include <glob.h>
 #include <errno.h>
 #include <sys/stat.h>
 
+#include "md5.h"
 #include "config.h"
+#include "db.h"
 #include "ssh_session.h"
 
+// #define DONT_UPLOAD
 #define DEFAULT_CONFIG_FILE "sshul.json"
 
-#define FLAG_LIST_ALL       0x01 // list all matched file
-#define FLAG_LIST_UPLOAD    0x02 // list the files to be uploaded
-#define FLAG_DO_INIT        0x04 // create all stat files
-#define FLAG_DO_CLEAN       0x08 // remove all stat files
-#define FLAG_DO_UPLOAD      0x10 // upload the files to be uploaded
-#define FLAG_GEN_CONFIG     0x20 // generate template config file
+enum {
+    ACT_NONE,
+    ACT_GEN_CONFIG,
+    ACT_LIST_ALL,
+    ACT_LIST_UPLOAD,
+    ACT_DO_INIT,
+    ACT_DO_CLEAN,
+    ACT_DO_UPLOAD,
+};
 
-/* create an empty file */
-static int create_file(const char* path)
-{
-    int r = open(path, O_RDWR | O_CREAT, 0644);
-
-    if (r < 0) return -1;
-
-    close(r);
-    return 0;
-}
-
-/* create an empty file and missing directory */
-static int create_file_r(const char* path)
-{
-    xstr_t name;
-    const char* p;
-    int r = create_file(path);
-
-    if (r != 0 && errno != ENOENT) {
-        return -1;
-    }
-
-    xstr_init(&name, 128);
-
-    /* create missing dirs */
-    while ((p = strchr(path, '/')) != NULL) {
-        xstr_append(&name, path, ++p - path);
-        r = mkdir(xstr_data(&name), 0755);
-        path = p;
-    }
-
-    /* create file */
-    if (*path) { /* 'path' not end with '/' */
-        xstr_append(&name, path, -1);
-        r = create_file(xstr_data(&name));
-    }
-
-    xstr_destroy(&name);
-
-    return r;
-}
-
+/* expand files which contains wildcard and so on */
 static void expand_files(xlist_t* files)
 {
     xstr_t file;
@@ -85,104 +49,100 @@ static void expand_files(xlist_t* files)
     }
 }
 
-static void proccess_files(options_t* o, int flag)
+static int process_files(options_t* o, xhash_t* db, int act)
 {
+#ifndef DONT_UPLOAD
     ssh_session_t* ssh = NULL;
     sftp_session_t* sftp = NULL;
-    xlist_iter_t iter;
+    xstr_t* remote_f = NULL;
+#endif
+    struct stat s;
 
-    xstr_t* local_f;
-    xstr_t* remote_f;
-    xstr_t* stat_f;
-
-    struct stat curr;
-    struct stat befo;
-
-    if (flag & FLAG_DO_UPLOAD) {
+#ifndef DONT_UPLOAD
+    if (act == ACT_DO_UPLOAD) {
+        /* build ssh session */
         ssh = ssh_session_open(
             xstr_data(&o->remote_host), o->remote_port,
             xstr_data(&o->remote_user), xstr_data(&o->remote_passwd));
 
-        if (!ssh) return;
+        if (!ssh) {
+            fprintf(stderr, "build ssh session failed, exit.\n");
+            return 1;
+        }
 
         if (o->use_sftp) {
             sftp = sftp_session_new(ssh);
+
             if (!sftp) {
                 fprintf(stderr, "sftp_session_new failed, use scp instead.\n");
             }
         }
+
+        remote_f = xstr_new(128);
+        xstr_append_str(remote_f, &o->remote_path);
+        xstr_push_back(remote_f, '/');
     }
+#endif
 
-    remote_f = xstr_new(128);
-    xstr_append_str(remote_f, &o->remote_path);
-    xstr_push_back(remote_f, '/');
+    for (xlist_iter_t iter = xlist_begin(&o->local_files);
+            iter != xlist_end(&o->local_files); iter = xlist_iter_next(iter)) {
 
-    stat_f = xstr_new(128);
-    xstr_append_str(stat_f, &o->stats_path);
-    xstr_push_back(stat_f, '/');
+        xstr_t* local_f = xlist_iter_value(iter);
 
-    for (iter = xlist_begin(&o->local_files);
-            iter != xlist_end(&o->local_files);
-            iter = xlist_iter_next(iter)) {
-
-        local_f = xlist_iter_value(iter);
-
-        xstr_assign_str_at(remote_f,
-            xstr_size(&o->remote_path) + 1, local_f);
-        xstr_assign_str_at(stat_f,
-            xstr_size(&o->stats_path) + 1, local_f);
-
-        stat(xstr_data(local_f), &curr); /* no need to check it's return value */
+        /* no need to check 'stat' return value */
+        stat(xstr_data(local_f), &s);
 
         /* skip a directory */
-        if (S_ISDIR(curr.st_mode)) continue;
+        if (S_ISDIR(s.st_mode)) continue;
 
-        if (flag & FLAG_LIST_ALL) {
+        switch (act)
+        {
+        case ACT_LIST_ALL:
             fprintf(stdout, "%s\n", xstr_data(local_f));
-        } else if (flag & FLAG_DO_CLEAN) {
-            fprintf(stdout, "rmstat [%s].\n", xstr_data(stat_f));
-            unlink(xstr_data(stat_f));
-        } else if (stat(xstr_data(stat_f), &befo) != 0) {
-            if (flag & FLAG_LIST_UPLOAD) {
-                fprintf(stdout, "%s\n", xstr_data(local_f));
-            } else if (flag & FLAG_DO_INIT) {
-                fprintf(stdout, "stat [%s].\n", xstr_data(local_f));
-                create_file_r(xstr_data(stat_f));
-            } else if (flag & FLAG_DO_UPLOAD) {
-                fprintf(stdout, "upload [%s].\n", xstr_data(local_f));
+            break;
+        case ACT_LIST_UPLOAD:
+            if (!db_check(db, xstr_data(local_f), s.st_mtime))
+                break;
+            fprintf(stdout, "%s\n", xstr_data(local_f));
+            break;
+        case ACT_DO_INIT:
+            if (!db_check(db, xstr_data(local_f), s.st_mtime))
+                break;
+            fprintf(stdout, "init [%s].\n", xstr_data(local_f));
+            db_update(db, xstr_data(local_f), s.st_mtime);
+            break;
+        case ACT_DO_UPLOAD:
+            if (!db_check(db, xstr_data(local_f), s.st_mtime))
+                break;
+            fprintf(stdout, "upload [%s].\n", xstr_data(local_f));
+#ifndef DONT_UPLOAD
+            xstr_assign_str_at(remote_f,
+                xstr_size(&o->remote_path) + 1, local_f);
 
-                if (-1 != (sftp
-                    ? sftp_send_file(sftp,
-                        xstr_data(local_f), xstr_data(remote_f))
-                    : scp_send_file(ssh,
-                        xstr_data(local_f), xstr_data(remote_f)))) {
-                    create_file_r(xstr_data(stat_f));
-                }
+            if (-1 != (sftp
+                ? sftp_send_file(sftp,
+                    xstr_data(local_f), xstr_data(remote_f))
+                : scp_send_file(ssh,
+                    xstr_data(local_f), xstr_data(remote_f)))) {
+#endif
+                db_update(db, xstr_data(local_f), s.st_mtime);
+#ifndef DONT_UPLOAD
             }
-        } else if (curr.st_mtime > befo.st_mtime) {
-            if (flag & FLAG_LIST_UPLOAD) {
-                fprintf(stdout, "%s\n", xstr_data(local_f));
-            } else if (flag & FLAG_DO_INIT) {
-                fprintf(stdout, "stat [%s].\n", xstr_data(local_f));
-                utime(xstr_data(stat_f), NULL);
-            } else if (flag & FLAG_DO_UPLOAD) {
-                fprintf(stdout, "upload [%s].\n", xstr_data(local_f));
-
-                if (-1 != (sftp
-                    ? sftp_send_file(sftp,
-                        xstr_data(local_f), xstr_data(remote_f))
-                    : scp_send_file(ssh,
-                        xstr_data(local_f), xstr_data(remote_f)))) {
-                    utime(xstr_data(stat_f), NULL);
-                }
-            }
+#endif
+            break;
+        default:
+            /* never reach here */
+            fprintf(stderr, "fatal error.\n");
+            break;
         }
     }
 
+#ifndef DONT_UPLOAD
     xstr_free(remote_f);
-    xstr_free(stat_f);
     sftp_session_free(sftp);
     ssh_session_close(ssh);
+#endif
+    return 0;
 }
 
 #define CONFIG_TEMPLATE                                 \
@@ -196,10 +156,9 @@ static void proccess_files(options_t* o, int flag)
     "    \"local_files\": [\n"                          \
     "        \"*.c\", \"*.h\", \".vscode/*.json\"\n"    \
     "    ],\n"                                          \
-    "    \"stats_path\": \"/tmp/.stats\",\n"            \
+    "    \"db_path\": \"/tmp\",\n"                      \
     "    \"use_sftp\": true\n"                          \
     "}\n"
-
 static int generate_config_file(const char* file)
 {
     int fd = open(file, O_WRONLY | O_CREAT | O_EXCL, 0644);
@@ -207,13 +166,16 @@ static int generate_config_file(const char* file)
     if (fd < 0) {
         fprintf(stderr, "failed open file [%s]: %s.\n",
             file, strerror(errno));
-        return -1;
+        return 1;
     }
 
     fprintf(stdout, "write template config file to [%s].\n", file);
 
-    if (write(fd, CONFIG_TEMPLATE, sizeof(CONFIG_TEMPLATE) - 1) < 0) {
+    if (write(fd, CONFIG_TEMPLATE, sizeof(CONFIG_TEMPLATE) - 1)
+            != sizeof(CONFIG_TEMPLATE) - 1) {
         fprintf(stderr, "write failed: %s.\n", strerror(errno));
+        close(fd);
+        return 1;
     }
 
     close(fd);
@@ -221,78 +183,130 @@ static int generate_config_file(const char* file)
 }
 #undef CONFIG_TEMPLATE
 
-static void usage(const char* name)
+#define DB_FILE_PREFIX  "sshul-db-"
+static void generate_db_file_name(xstr_t* s, options_t* o)
+{
+    md5_t ctx;
+    uint8_t digest[16];
+    char str[32];
+    int i;
+
+    md5_init(&ctx);
+    md5_update(&ctx, xstr_data(&o->remote_host),
+        xstr_size(&o->remote_host) + 1);
+    md5_update(&ctx, &o->remote_port, sizeof(o->remote_port));
+    md5_update(&ctx, xstr_data(&o->remote_path),
+        xstr_size(&o->remote_path) + 1);
+    md5_update(&ctx, xstr_data(&o->local_path),
+        xstr_size(&o->local_path) + 1);
+    md5_final(digest, &ctx);
+
+    for (i = 0; i < 16; ++i) {
+        str[i * 2] = "0123456789abcdef"[digest[i] >> 4];
+        str[i * 2 + 1] = "0123456789abcdef"[digest[i] & 15];
+    }
+
+    xstr_assign_str(s, &o->db_path);
+    xstr_push_back(s, '/');
+    xstr_append(s, DB_FILE_PREFIX, sizeof(DB_FILE_PREFIX) - 1);
+    xstr_append(s, str, sizeof(str));
+}
+#undef DB_FILE_PREFIX
+
+static int usage(const char* name)
 {
     fprintf(stderr, "usage: %s [option]\n"
         "    -l      - list the files to be uploaded.\n"
         "    -a      - list all matched file.\n"
         "    -u      - upload the files to be uploaded.\n"
-        "    -i      - create all stat files.\n"
-        "    -c      - remove all stat files.\n"
+        "    -i      - initialize the db file.\n"
+        "    -c      - remove the db file.\n"
         "    -t      - generate template config file.\n"
-        "    -f file - set config file. (default: " DEFAULT_CONFIG_FILE ")\n", name);
+        "    -f file - set config file. (default: " DEFAULT_CONFIG_FILE ")\n"
+        "    -h      - show this help message.\n", name);
+
+    return 1;
 }
 
 extern char* optarg;
 
 int main(int argc, char** argv)
 {
-    options_t* opts;
-    const char* cfg_file = DEFAULT_CONFIG_FILE;
-    int flag = 0;
-    int c;
+    char* cfg_file = DEFAULT_CONFIG_FILE;
+    int act = ACT_NONE;
+    int r;
 
-    while ((c = getopt(argc, argv, "lauictf:")) != -1) {
-        switch (c)
+    while ((r = getopt(argc, argv, "lauictf:h")) != -1) {
+        switch (r)
         {
-        case 'l': flag = FLAG_LIST_UPLOAD; break;
-        case 'a': flag = FLAG_LIST_ALL   ; break;
-        case 'u': flag = FLAG_DO_UPLOAD  ; break;
-        case 'i': flag = FLAG_DO_INIT    ; break;
-        case 'c': flag = FLAG_DO_CLEAN   ; break;
-        case 't': flag = FLAG_GEN_CONFIG ; break;
-        case 'f': cfg_file = optarg      ; break;
+        case 'l': act = ACT_LIST_UPLOAD ; break;
+        case 'a': act = ACT_LIST_ALL    ; break;
+        case 'u': act = ACT_DO_UPLOAD   ; break;
+        case 'i': act = ACT_DO_INIT     ; break;
+        case 'c': act = ACT_DO_CLEAN    ; break;
+        case 't': act = ACT_GEN_CONFIG  ; break;
+        case 'f': cfg_file = optarg     ; break;
+        case 'h':
         default:
-            usage(argv[0]);
-            return 1;
+            return usage(argv[0]);
         }
     }
-    if (!flag) {
-        usage(argv[0]);
+
+    if (act == ACT_NONE) {
+        return usage(argv[0]);
+    }
+
+    if (act == ACT_GEN_CONFIG) {
+        return generate_config_file(cfg_file);
+    }
+
+    options_t* opts = config_load(cfg_file);
+
+    if (!opts) {
+        fprintf(stderr, "config load failed, exit.\n");
         return 1;
     }
-    if (flag & FLAG_GEN_CONFIG) {
-        generate_config_file(cfg_file);
-        return 0;
-    }
 
-    opts = config_load(cfg_file);
-
-    if (!opts) return 1;
-
+    xstr_t* buf = xstr_new(64);
     char* p = strrchr(cfg_file, '/');
+    xhash_t* db;
 
+    r = 1;
     /* cd to config file's path */
     if (p) {
-        char* buf = malloc(p - cfg_file + 1);
-        memcpy(buf, cfg_file, p - cfg_file);
-        buf[p - cfg_file] = '\0';
+        xstr_assign(buf, cfg_file, p - cfg_file);
 
-        if (chdir(buf) != 0) {
-            fprintf(stderr, "can't cd to [%s].\n", buf);
+        if (chdir(xstr_data(buf)) != 0) {
+            fprintf(stderr, "can't cd to [%s].\n", xstr_data(buf));
+            goto end;
         }
-        free(buf);
     }
 
     /* cd to opts->local_path */
     if (chdir(xstr_data(&opts->local_path)) != 0) {
-        fprintf(stderr, "can't cd to [%s].\n",
-            xstr_data(&opts->local_path));
+        fprintf(stderr, "can't cd to [%s].\n", xstr_data(&opts->local_path));
+        goto end;
     }
 
-    expand_files(&opts->local_files);
-    proccess_files(opts, flag);
+    generate_db_file_name(buf, opts);
 
+    if (act == ACT_DO_CLEAN) {
+        r = unlink(xstr_data(buf)) < 0 ? 1 : 0;
+        if (r)
+            fprintf(stderr, "rm [%s] failed.\n", xstr_data(buf));
+        else
+            fprintf(stderr, "rm [%s] done.\n", xstr_data(buf));
+        goto end;
+    }
+
+    db = db_open(xstr_data(buf));
+
+    expand_files(&opts->local_files);
+    r = process_files(opts, db, act);
+
+    db_close(xstr_data(buf), db);
+end:
+    xstr_free(buf);
     config_free(opts);
-    return 0;
+    return r;
 }

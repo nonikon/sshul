@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -94,9 +95,9 @@ int sftp_send_file(sftp_session_t* s, const char* local, const char* remote)
 {
     LIBSSH2_SFTP_HANDLE* hdl;
     struct stat f;
-    FILE* fp;
     char* buf;
     char* pos;
+    int fd;
     int retried = 0;
     int nr, nw = -1;
 
@@ -160,14 +161,14 @@ retry:
         goto retry;
     }
 
-    fp = fopen(local, "r");
+    fd = open(local, O_RDONLY);
 
-    if (fp) {
+    if (fd != -1) {
         buf = malloc(READ_BUF_SIZE);
 
         do {
             pos = buf;
-            nr = fread(buf, 1, READ_BUF_SIZE, fp);
+            nr = read(fd, buf, READ_BUF_SIZE);
 
             if (nr <= 0) break;
 
@@ -187,7 +188,7 @@ retry:
         while (1);
 
         free(buf);
-        fclose(fp);
+        close(fd);
     }
 
     libssh2_sftp_close_handle(hdl);
@@ -199,10 +200,10 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
 {
     LIBSSH2_CHANNEL* ch;
     struct stat f;
-    FILE* fp;
     char* errmsg;
     char* buf;
     char* pos;
+    int fd;
     int nr, nw = -1;
 
     if (stat(local, &f) != 0) {
@@ -219,14 +220,14 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
         return -1;
     }
 
-    fp = fopen(local, "r");
+    fd = open(local, O_RDONLY);
 
-    if (fp) {
+    if (fd != -1) {
         buf = malloc(READ_BUF_SIZE);
 
         do {
             pos = buf;
-            nr = fread(buf, 1, READ_BUF_SIZE, fp);
+            nr = read(fd, buf, READ_BUF_SIZE);
 
             if (nr <= 0) break;
 
@@ -246,7 +247,7 @@ int scp_send_file(ssh_session_t* s, const char* local, const char* remote)
         while (1);
 
         free(buf);
-        fclose(fp);
+        close(fd);
     }
 
     libssh2_channel_send_eof(ch);

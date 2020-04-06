@@ -13,7 +13,7 @@ typedef struct options
     xstr_t  remote_path;
     xstr_t  local_path;
     xlist_t local_files; // element type 'xstr_t'
-    xstr_t  stats_path;
+    xstr_t  db_path;
     int     use_sftp;
 } options_t;
 
