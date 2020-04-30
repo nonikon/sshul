@@ -53,7 +53,7 @@ if [ ! -f libssh2.a ]; then
     echo "use cmake to build libssh2"
     cd build
     cmake -DBUILD_SHARED_LIBS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF \
-            -DENABLE_DEBUG_LOGGING=OFF ENABLE_ZLIB_COMPRESSION=OFF \
+            -DENABLE_DEBUG_LOGGING=OFF -DCLEAR_MEMORY=OFF -DENABLE_ZLIB_COMPRESSION=OFF \
             -DCRYPTO_BACKEND=$CRYPTO ..
     cmake --build .
     cd ..
