@@ -1,6 +1,8 @@
 .vscode/
 libssh2-*/
 libssh2-*.tar.gz
+mbedtls-*/
+mbedtls-*.tgz
 *.a
 *.o
 sshul
