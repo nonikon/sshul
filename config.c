@@ -1,6 +1,5 @@
 #include <string.h>
 #include <stdio.h>
-#include <sys/stat.h>
 
 #include "config.h"
 #include "json_wrapper.h"
@@ -12,10 +11,8 @@ static void _on_xstr_free(void* pvalue)
     xstr_destroy(pvalue);
 }
 
-static options_t* options_new()
+static void options_init(options_t* o)
 {
-    options_t* o = malloc(sizeof(options_t));
-
     xstr_init(&o->remote_host, 36);
     o->remote_port = 22;
     xstr_init(&o->remote_user, 16);
@@ -25,14 +22,10 @@ static options_t* options_new()
     xstr_init(&o->db_path, 128);
     o->use_sftp = 1; /* default use 'sftp' */
     xlist_init(&o->local_files, sizeof(xstr_t), _on_xstr_free);
-
-    return o;
 }
 
-static void options_free(options_t* o)
+static void options_destroy(options_t* o)
 {
-    if (!o) return;
-
     xstr_destroy(&o->remote_host);
     xstr_destroy(&o->remote_user);
     xstr_destroy(&o->remote_passwd);
@@ -40,8 +33,6 @@ static void options_free(options_t* o)
     xstr_destroy(&o->local_path);
     xstr_destroy(&o->db_path);
     xlist_destroy(&o->local_files);
-
-    free(o);
 }
 
 static int set_option_local_files(xlist_t* files, json_value* jarr)
@@ -176,83 +167,71 @@ static int check_options(options_t* o)
 
 static char* file_full_read(const char* file, int* blen)
 {
-    struct stat s;
-    int len;
-    char* buf = NULL;
-    FILE* fp = NULL;
+    char* buf;
+    FILE* fp;
+    int nr;
 
-    if (stat(file, &s) != 0) {
-        fprintf(stderr, "config file [%s] not found.\n", file);
-        return NULL;
-    }
-
-    len = s.st_size;
-
-    if (len > CONFIG_FILE_MAXSZ) {
-        fprintf(stderr, "config file [%s] to large.\n", file);
-        return NULL;
-    }
-
-    buf = malloc(len);
-
+    buf = malloc(CONFIG_FILE_MAXSZ);
     if (!buf) {
-        fprintf(stderr, "failed alloc [%d] bytes memory.\n", len);
+        fprintf(stderr, "out of memory.\n");
         return NULL;
     }
 
     fp = fopen(file, "r");
-
     if (!fp) {
-        fprintf(stderr, "unable to open config file [%s].\n", file);
-        free(buf);
-        return NULL;
+        fprintf(stderr, "open config file [%s] failed.\n", file);
+        goto err;
     }
 
-    if (fread(buf, 1, len, fp) != len) {
-        fprintf(stderr, "failed to read config file [%s].\n", file);
-        fclose(fp);
-        free(buf);
-        return NULL;
-    }
+    nr = fread(buf, 1, CONFIG_FILE_MAXSZ, fp);
     fclose(fp);
 
-    *blen = len;
+    if (nr <= 0) {
+        fprintf(stderr, "failed read config file [%s].\n", file);
+        goto err;
+    }
+    if (nr == CONFIG_FILE_MAXSZ) {
+        fprintf(stderr, "config file [%s] too large.\n", file);
+        goto err;
+    }
 
+    buf[*blen = nr] = '\0';
     return buf;
+err:
+    free(buf);
+    return NULL;
 }
 
-options_t* config_load(const char* file)
+int config_load(options_t* opts, const char* file)
 {
-    options_t* opts;
     int len;
     char* buf = file_full_read(file, &len);
     json_value* jval;
 
-    if (!buf) return NULL;
+    if (!buf) return -1;
 
     jval = json_parse(buf, len);
-
     free(buf);
 
     if (!jval) {
         fprintf(stderr, "unable to parse data as a json.\n");
-        return NULL;
+        return -1;
     }
 
-    opts = options_new();
+    options_init(opts);
 
     if (set_options(opts, jval) != 0
             || check_options(opts) != 0) {
-        options_free(opts);
-        opts = NULL;
+        options_destroy(opts);
+        json_value_free(jval);
+        return -1;
     }
 
     json_value_free(jval);
-
-    return opts;
+    return 0;
 }
 
-void config_free(options_t* opts)
+void config_destroy(options_t* opts)
 {
-    options_free(opts);
+    options_destroy(opts);
 }

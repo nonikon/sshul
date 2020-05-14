@@ -11,7 +11,7 @@
 #define XLIST_NO_CACHE
 
 /* uncomment this line to disable xlist_cut_* interface. */
-// #define XLIST_NO_CUT
+#define XLIST_NO_CUT
 
 typedef struct xlist        xlist_t;
 typedef struct xlist_node   xlist_node_t;

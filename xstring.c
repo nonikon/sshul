@@ -190,23 +190,34 @@ const char g_xstr_i2c_table[] = {
     'U', 'V', 'W', 'X', 'Y', 'Z'
 };
 
-char* uitoa(char* buf, unsigned int val, int radix)
+char* ultoa(char* buf, unsigned long val, int radix)
 {
-    int off = 0;
-    unsigned int v = val;
+    int l = 0;
+    int r = 0;
+    char c;
 
-    if (!v) { ++off; }
-    else do
+    if (!val)
     {
-        v /= radix;
-        ++off;
-    } while (v);
+        buf[0] = '0';
+        buf[1] = '\0';
+        return buf;
+    }
 
-    buf[off] = '\0';
-    while (off)
+    do
     {
-        buf[--off] = g_xstr_i2c_table[val % radix];
+        buf[r++] = g_xstr_i2c_table[val % radix];
         val /= radix;
+    }
+    while (val);
+
+    buf[r--] = '\0';
+
+    /* string reverse */
+    while (l < r)
+    {
+        c = buf[l];
+        buf[l++] = buf[r];
+        buf[r--] = c;
     }
 
     return buf;
@@ -231,9 +242,9 @@ const unsigned char g_xstr_c2i_table[] = {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 };
 
-unsigned int atoui(const char* str, int base)
+unsigned long atoul(const char* str, char** ep, int base)
 {
-    unsigned int acc = 0;
+    unsigned long acc = 0;
     unsigned char v;
 
     while (*str)
@@ -245,6 +256,8 @@ unsigned int atoui(const char* str, int base)
 
         acc = acc * base + v;
     }
+
+    if (ep) *ep = (char*)str;
 
     return acc;
 }

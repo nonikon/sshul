@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -30,14 +29,14 @@ static void _destr_cb(void* v)
     free(((file_info_t*)v)->path);
 }
 
-int db_check(xhash_t* db, const char* fname, time_t t)
+int db_check(db_t* db, const char* fname, time_t t)
 {
     file_info_t* pf = xhash_get_ex(db, &fname);
 
     return pf == XHASH_INVALID || t > pf->mtime;
 }
 
-int db_update(xhash_t* db, const char* fname, time_t t)
+int db_update(db_t* db, const char* fname, time_t t)
 {
     file_info_t* pf = xhash_get_ex(db, &fname);
 
@@ -67,7 +66,7 @@ int db_update(xhash_t* db, const char* fname, time_t t)
     return 0;
 }
 
-xhash_t* db_open(const char* file)
+db_t* db_open(const char* file)
 {
     xhash_t* db = xhash_new(-1, sizeof(file_info_t),
                     _hash_cb, _equal_cb, _destr_cb);
@@ -89,9 +88,9 @@ xhash_t* db_open(const char* file)
 
         f.path = malloc(f.len);
 
-        if (read(fd, f.path, f.len) != f.len
-                || f.path[f.len - 1] != '\0'
-                || read(fd, &f.mtime, sizeof(f.mtime)) != sizeof(f.mtime)) {
+        if (read(fd, f.path, f.len) != f.len ||
+                f.path[f.len - 1] != '\0' ||
+                read(fd, &f.mtime, sizeof(f.mtime)) != sizeof(f.mtime)) {
             fprintf(stderr, "broken db file, break.\n");
             free(f.path);
             break;
@@ -106,7 +105,7 @@ xhash_t* db_open(const char* file)
     return db;
 }
 
-void db_close(const char* file, xhash_t* db)
+void db_close(const char* file, db_t* db)
 {
     int fd = open(file, O_WRONLY | O_CREAT, 0644);
     int need_seek = 1;
@@ -153,9 +152,9 @@ void db_close(const char* file, xhash_t* db)
                 }
                 need_seek = 0;
             }
-            if (write(fd, &f->len, sizeof(f->len)) != sizeof(f->len)
-                    || write(fd, f->path, f->len) != f->len
-                    || write(fd, &f->mtime, sizeof(f->mtime)) != sizeof(f->mtime)) {
+            if (write(fd, &f->len, sizeof(f->len)) != sizeof(f->len) ||
+                    write(fd, f->path, f->len) != f->len ||
+                    write(fd, &f->mtime, sizeof(f->mtime)) != sizeof(f->mtime)) {
                 fprintf(stderr, "write db file failed.\n");
                 break;
             }
