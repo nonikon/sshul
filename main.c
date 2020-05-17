@@ -3,16 +3,15 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <glob.h>
 #include <errno.h>
-#include <sys/stat.h>
 
 #include "md5.h"
 #include "config.h"
 #include "db.h"
 #include "ssh_session.h"
+#include "match.h"
 
-#define VERSION_STRING      "1.0.0"
+#define VERSION_STRING      "1.1.0"
 
 // #define DONT_UPLOAD
 #define DEFAULT_CONFIG_FILE "sshul.json"
@@ -37,38 +36,45 @@ static struct {
     db_t*       db;
 } G;
 
-static void process_file(const char* local, const char* remote,
-        time_t mtime, int mode, unsigned long size)
+static void process_file(const char* file, int mode, uint64_t mtime, uint64_t size)
 {
     if (G.act == ACT_LIST_ALL) {
-        fprintf(stdout, "%s\n", local);
+        fprintf(stdout, "%s\n", file);
         return;
     }
 
-    if (!db_check(G.db, local, mtime)) {
+    if (!db_check(G.db, file, mtime)) {
         /* need do nothing, return */
         return;
     }
 
     if (G.act == ACT_LIST_UPLOAD) {
-        fprintf(stdout, "%s\n", local);
+        fprintf(stdout, "%s\n", file);
         return;
     }
     if (G.act == ACT_DO_UPLOAD) {
-        fprintf(stdout, "upload [%s].\n", local);
+        xstr_t* remote = &G.opts.remote_path;
+        unsigned off = xstr_size(remote);
+
+        fprintf(stdout, "upload [%s].\n", file);
 #ifndef DONT_UPLOAD
-        if ((G.sftp ? sftp_send_file(G.sftp, local, remote, mode, size)
-                : scp_send_file(G.scp, local, remote, mode, size)) != -1) {
+        xstr_push_back(remote, '/');
+        xstr_append(remote, file, -1);
+
+        if ((G.sftp ? sftp_send_file(G.sftp, file, xstr_data(remote), mode, size)
+                : scp_send_file(G.scp, file, xstr_data(remote), mode, size)) != -1) {
 #endif
-            db_update(G.db, local, mtime);
+            db_update(G.db, file, mtime);
 #ifndef DONT_UPLOAD
         }
+
+        xstr_erase(remote, off, -1);
 #endif
         return;
     }
     if (G.act == ACT_DO_INIT) {
-        fprintf(stdout, "init [%s].\n", local);
-        db_update(G.db, local, mtime);
+        fprintf(stdout, "init [%s].\n", file);
+        db_update(G.db, file, mtime);
         return;
     }
 
@@ -76,70 +82,55 @@ static void process_file(const char* local, const char* remote,
     fprintf(stderr, "fatal error.\n");
 }
 
-static void process_files()
-{
-    struct stat s;
-    glob_t globbuf;
-    xstr_t remotef;
-
-    xstr_init(&remotef, 128);
-    xstr_append_str(&remotef, &G.opts.remote_path);
-    xstr_push_back(&remotef, '/');
-
-    for (xlist_iter_t it = xlist_begin(&G.opts.local_files);
-            it != xlist_end(&G.opts.local_files); it = xlist_iter_next(it)) {
-
-        /* TODO, win32 support */
-        glob(xstr_data((xstr_t*)xlist_iter_value(it)),
-                GLOB_NOSORT, NULL, &globbuf);
-
-        for (int i = 0; i < globbuf.gl_pathc; ++i) {
-            /* no need to check 'stat' return value */
-            stat(globbuf.gl_pathv[i], &s);
-            /* skip a directory */
-            if (S_ISDIR(s.st_mode)) {
-                continue;
-            }
-            xstr_assign_at(&remotef, xstr_size(&G.opts.remote_path) + 1,
-                globbuf.gl_pathv[i], -1);
-            process_file(globbuf.gl_pathv[i], xstr_data(&remotef),
-                s.st_mtime, s.st_mode, s.st_size);
-        }
-
-        globfree(&globbuf);
-    }
-
-    xstr_destroy(&remotef);
-}
-
-#define CONFIG_TEMPLATE                                 \
-    "{\n"                                               \
-    "    \"remote_host\": \"192.168.1.1\",\n"           \
-    "    \"remote_port\": 22,\n"                        \
-    "    \"remote_user\": \"root\",\n"                  \
-    "    \"remote_passwd\": \"123456\",\n"              \
-    "    \"remote_path\": \"/tmp\",\n"                  \
-    "    \"local_path\": \".\",\n"                      \
-    "    \"local_files\": [\n"                          \
-    "        \"*.c\", \"*.h\", \".vscode/*.json\"\n"    \
-    "    ],\n"                                          \
-    "    \"db_path\": \"/tmp\",\n"                      \
-    "    \"use_sftp\": true\n"                          \
+#define CFG_TEMPLATE_0                          \
+    "{\n"                                       \
+    "    \"remote_host\": \"192.168.1.1\",\n"   \
+    "    \"remote_port\": 22,\n"                \
+    "    \"remote_user\": \"root\",\n"          \
+    "    \"remote_passwd\": \"123456\",\n"      \
+    "    \"remote_path\": \"/tmp\",\n"          \
+    "    \"local_path\": \".\",\n"              \
+    "    \"local_files\": [\n"                  \
+    "        \"*.[ch]\", \".vscode/*.json\"\n"  \
+    "    ],\n"                                  \
+    "    \"db_path\": \""
+ #define CFG_TEMPLATE_1                         \
+                        "\",\n"                 \
+    "    \"use_sftp\": true\n"                  \
     "}\n"
 static int generate_config_file(const char* file)
 {
     int fd = open(file, O_WRONLY | O_CREAT | O_EXCL, 0644);
+    int nlen;
+    char name[256];
 
     if (fd < 0) {
         fprintf(stderr, "failed open file [%s]: %s.\n",
             file, strerror(errno));
         return 1;
     }
-
+#ifdef _WIN32
+    nlen = GetTempPathA(sizeof(name), name);
+    if (nlen == 0) {
+        strcpy(name, ".");
+        nlen = 1;
+    } else {
+        for (char* p = name; p[0]; ++p) {
+            if (p[0] == '\\') p[0] = '/';
+        }
+        if (name[nlen - 1] == '/') {
+            name[--nlen] = '\0';
+        }
+    }
+#else
+    strcpy(name, "/tmp");
+    nlen = 4;
+#endif
     fprintf(stdout, "write template config file to [%s].\n", file);
 
-    if (write(fd, CONFIG_TEMPLATE, sizeof(CONFIG_TEMPLATE) - 1)
-            != sizeof(CONFIG_TEMPLATE) - 1) {
+    if (write(fd, CFG_TEMPLATE_0, sizeof(CFG_TEMPLATE_0) - 1) != sizeof(CFG_TEMPLATE_0) - 1
+        || write(fd, name, nlen) != nlen
+        || write(fd, CFG_TEMPLATE_1, sizeof(CFG_TEMPLATE_1) - 1) != sizeof(CFG_TEMPLATE_1) - 1) {
         fprintf(stderr, "write failed: %s.\n", strerror(errno));
         close(fd);
         return 1;
@@ -202,7 +193,7 @@ static int parse_args(int argc, char** argv)
                     } else if (++i < argc) {
                         arg = argv[i];
                     } else {
-                        fprintf(stderr, "Broken args [-%c].\n", arg[0]);
+                        fprintf(stderr, "opt [-%c] need an arg.\n", arg[0]);
                         return 1;
                     }
                     G.cfg = arg;
@@ -240,7 +231,7 @@ static int parse_args(int argc, char** argv)
 int main(int argc, char** argv)
 {
     if (parse_args(argc, argv) != 0 || G.act == ACT_NONE) {
-        fprintf(stderr, "Usage: %s [option]\n"
+        fprintf(stderr, "Usage: %s [option].\n"
             "    -l      - list the files to be uploaded.\n"
             "    -a      - list all matched file.\n"
             "    -u      - upload the files to be uploaded.\n"
@@ -267,23 +258,22 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    char* p;
     xstr_t* buf = xstr_new(64);
-    char* p = strrchr(G.cfg, '/');
     int rc = 1;
 
     /* cd to config file's path */
-    if (p) {
+#ifdef _WIN32
+    if ((p = strrchr(G.cfg, '/')) ||
+        (p = strrchr(G.cfg, '\\'))) {
+#else
+    if ((p = strrchr(G.cfg, '/'))) {
+#endif
         xstr_assign(buf, G.cfg, p - G.cfg);
-
         if (chdir(xstr_data(buf)) != 0) {
             fprintf(stderr, "can't cd to [%s].\n", xstr_data(buf));
             goto end;
         }
-    }
-    /* cd to opts->local_path */
-    if (chdir(xstr_data(&G.opts.local_path)) != 0) {
-        fprintf(stderr, "can't cd to [%s].\n", xstr_data(&G.opts.local_path));
-        goto end;
     }
 
     generate_db_file_name(buf, &G.opts);
@@ -326,7 +316,13 @@ int main(int argc, char** argv)
     rc = 0;
 
     G.db = db_open(xstr_data(buf));
-    process_files();
+
+    for (xlist_iter_t it = xlist_begin(&G.opts.local_files);
+            it != xlist_end(&G.opts.local_files); it = xlist_iter_next(it)) {
+        match_files(xstr_data(&G.opts.local_path),
+            xstr_data((xstr_t*)xlist_iter_value(it)), process_file);
+    }
+
     db_close(xstr_data(buf), G.db);
 
     sftp_session_free(G.sftp);

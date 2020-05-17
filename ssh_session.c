@@ -1,13 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
-#ifndef _WIN32
+#ifdef _WIN32
+#include <ws2tcpip.h>
+#else
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#else
-#include <ws2tcpip.h>
 #endif
 
 #include "ssh_session.h"
@@ -158,7 +158,7 @@ retry:
         goto retry;
     }
 
-    fp = fopen(local, "r");
+    fp = fopen(local, "rb");
 
     if (fp) {
         buf = malloc(READ_BUF_SIZE);
@@ -211,7 +211,7 @@ int scp_send_file(ssh_t* s, const char* local, const char* remote,
         return -1;
     }
 
-    fp = fopen(local, "r");
+    fp = fopen(local, "rb");
 
     if (fp) {
         buf = malloc(READ_BUF_SIZE);

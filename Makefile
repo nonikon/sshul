@@ -15,7 +15,7 @@ _CFLAGS = -Os -Wall -DNDEBUG $(CFLAGS)
 _LDFLAGS = -s $(LDFLAGS)
 endif
 
-OBJS = main.o config.o db.o ssh_session.o \
+OBJS = main.o match.o config.o db.o ssh_session.o \
 	json.o xlist.o xstring.o xhash.o md5.o
 
 all : $(TARGET)

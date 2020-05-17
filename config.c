@@ -177,7 +177,7 @@ static char* file_full_read(const char* file, int* blen)
         return NULL;
     }
 
-    fp = fopen(file, "r");
+    fp = fopen(file, "rb");
     if (!fp) {
         fprintf(stderr, "open config file [%s] failed.\n", file);
         goto err;

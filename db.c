@@ -9,9 +9,9 @@
 
 typedef struct {
     char*       path;
-    time_t      mtime;
-    unsigned    len;    // strlen(path) + 1
-    unsigned    mod;    // modified ?
+    uint64_t    mtime;
+    uint32_t    len;    // strlen(path) + 1
+    uint32_t    mod;    // modified ?
     int         fpos;   // ftell() of mtime
 } file_info_t;
 
@@ -29,14 +29,14 @@ static void _destr_cb(void* v)
     free(((file_info_t*)v)->path);
 }
 
-int db_check(db_t* db, const char* fname, time_t t)
+int db_check(db_t* db, const char* fname, uint64_t t)
 {
     file_info_t* pf = xhash_get_ex(db, &fname);
 
     return pf == XHASH_INVALID || t > pf->mtime;
 }
 
-int db_update(db_t* db, const char* fname, time_t t)
+int db_update(db_t* db, const char* fname, uint64_t t)
 {
     file_info_t* pf = xhash_get_ex(db, &fname);
 
@@ -71,7 +71,11 @@ db_t* db_open(const char* file)
     xhash_t* db = xhash_new(-1, sizeof(file_info_t),
                     _hash_cb, _equal_cb, _destr_cb);
     file_info_t f;
+#ifdef _WIN32
+    int fd = open(file, O_RDONLY | O_BINARY);
+#else
     int fd = open(file, O_RDONLY);
+#endif
 
     if (fd < 0) return db;
 
@@ -107,7 +111,11 @@ db_t* db_open(const char* file)
 
 void db_close(const char* file, db_t* db)
 {
+#ifdef _WIN32
+    int fd = open(file, O_WRONLY | O_CREAT | O_BINARY, 0644);
+#else
     int fd = open(file, O_WRONLY | O_CREAT, 0644);
+#endif
     int need_seek = 1;
 
     if (fd < 0) {
@@ -121,7 +129,7 @@ void db_close(const char* file, db_t* db)
     /* -------------------------------------------- */
     /* |  len  |  path (null-terminate)  |  mtime | */
     /* -------------------------------------------- */
-    /* |   2   |          (len)          |    8   | bytes */
+    /* |   4   |          (len)          |    8   | bytes */
     /* -------------------------------------------- */
 
     for (xhash_iter_t iter = xhash_begin(db);
