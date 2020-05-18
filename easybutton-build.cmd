@@ -83,12 +83,6 @@ if not exist %ssh2_lib% (
 
 echo build sshul
 mingw32-make CC=gcc MAKE_VERSION=release ^
-     CFLAGS=%ssh2_inc% LDFLAGS="%ssh2_lib% %mbedcrypto_lib% -lws2_32"
-
-if %errorlevel% == 1 (
-    echo build sshul failed
-) else (
-    echo build sshul done
-)
+     CFLAGS=-I%ssh2_inc% LDFLAGS="%ssh2_lib% %mbedcrypto_lib% -lws2_32"
 
 pause

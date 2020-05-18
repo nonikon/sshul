@@ -21,20 +21,20 @@ OBJS = main.o match.o config.o db.o ssh_session.o \
 all : $(TARGET)
 
 $(TARGET) : $(OBJS)
-	@echo --LD $@
+	@echo - LD $@
 	@$(CC) -o $@ $^ -lm $(_LDFLAGS)
 $(OBJS) : %.o : %.c
-	@echo --CC $@
+	@echo - CC $@
 	@$(CC) -c $< -o $@ $(_CFLAGS)
 
 .PHONY : install uninstall clean
 
 install :
-	@echo INSTALL $(TARGET) -> $(INSTALL_PATH)
+	@echo COPY [$(TARGET)] TO [$(INSTALL_PATH)]
 	@cp $(TARGET) $(INSTALL_PATH)
 uninstall :
-	@echo UNINSTALL $(INSTALL_PATH)/$(TARGET)
+	@echo DELETE [$(INSTALL_PATH)/$(TARGET)]
 	@$(RM) $(INSTALL_PATH)/$(TARGET)
 clean :
-	@echo REMOVE $(TARGET) $(OBJS)
+	@echo DELETE $(TARGET) $(OBJS)
 	@$(RM) $(TARGET) $(OBJS)
