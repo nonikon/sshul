@@ -141,7 +141,8 @@ static inline int is_valid_name(const char* s)
 }
 
 /* match files recursively. */
-static void match_files_rec(xstr_t* path, char* pattern, match_cb_t cb, unsigned baseoff)
+static void match_files_rec(xstr_t* path, char* pattern,
+                match_cb_t cb, unsigned baseoff)
 {
     unsigned off;
     char* p;
@@ -164,12 +165,13 @@ static void match_files_rec(xstr_t* path, char* pattern, match_cb_t cb, unsigned
 #ifdef _WIN32
             if (GetFileAttributesExA(xstr_data(path), GetFileExInfoStandard, &fattr)
                     && !(fattr.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+
                 cb(xstr_data(path) + baseoff, 0644, time_win2unix(&fattr.ftLastWriteTime),
                     (uint64_t)fattr.nFileSizeHigh | fattr.nFileSizeLow);
             }
 #else
             if (stat(xstr_data(path), &s) != -1 && S_ISREG(s.st_mode)) {
-                cb(xstr_data(path) + baseoff, s.st_mode & 0644, s.st_mtime, s.st_size);
+                cb(xstr_data(path) + baseoff, s.st_mode & 0777, s.st_mtime, s.st_size);
             }
 #endif
             xstr_erase(path, off, -1);
@@ -212,6 +214,7 @@ static void match_files_rec(xstr_t* path, char* pattern, match_cb_t cb, unsigned
                 do {
                     if (!(fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                             && glob_match(pattern, fdata.cFileName)) {
+
                         off = xstr_size(path);
                         xstr_append(path, fdata.cFileName, -1);
 
@@ -224,14 +227,16 @@ static void match_files_rec(xstr_t* path, char* pattern, match_cb_t cb, unsigned
                 while (FindNextFileA(fh, &fdata));
 #else
                 while (!!(ent = readdir(dir))) {
+
                     if (is_valid_name(ent->d_name)
                             && glob_match(pattern, ent->d_name)) {
+
                         off = xstr_size(path);
                         xstr_append(path, ent->d_name, -1);
 
                         if (stat(xstr_data(path), &s) != -1
                                 && S_ISREG(s.st_mode)) {
-                            cb(xstr_data(path) + baseoff, s.st_mode & 0644,
+                            cb(xstr_data(path) + baseoff, s.st_mode & 0777,
                                 s.st_mtime, s.st_size);
                         }
 
@@ -247,6 +252,7 @@ static void match_files_rec(xstr_t* path, char* pattern, match_cb_t cb, unsigned
                     if ((fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                             && is_valid_name(fdata.cFileName)
                             && glob_match(pattern, fdata.cFileName)) {
+
                         off = xstr_size(path);
 
                         xstr_append(path, fdata.cFileName, -1);
@@ -260,8 +266,10 @@ static void match_files_rec(xstr_t* path, char* pattern, match_cb_t cb, unsigned
                 while (FindNextFileA(fh, &fdata));
 #else
                 while (!!(ent = readdir(dir))) {
+
                     if (is_valid_name(ent->d_name)
                             && glob_match(pattern, ent->d_name)) {
+
                         off = xstr_size(path);
 
                         xstr_append(path, ent->d_name, -1);

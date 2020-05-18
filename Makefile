@@ -15,6 +15,14 @@ _CFLAGS = -Os -Wall -DNDEBUG $(CFLAGS)
 _LDFLAGS = -s $(LDFLAGS)
 endif
 
+ifdef OS
+CP = copy
+RM = del
+else
+CP = cp
+RM = rm
+endif
+
 OBJS = main.o match.o config.o db.o ssh_session.o \
 	json.o xlist.o xstring.o xhash.o md5.o
 
@@ -31,7 +39,7 @@ $(OBJS) : %.o : %.c
 
 install :
 	@echo COPY [$(TARGET)] TO [$(INSTALL_PATH)]
-	@cp $(TARGET) $(INSTALL_PATH)
+	@$(CP) $(TARGET) $(INSTALL_PATH)
 uninstall :
 	@echo DELETE [$(INSTALL_PATH)/$(TARGET)]
 	@$(RM) $(INSTALL_PATH)/$(TARGET)

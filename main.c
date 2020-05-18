@@ -10,8 +10,7 @@
 #include "db.h"
 #include "ssh_session.h"
 #include "match.h"
-
-#define VERSION_STRING      "1.1.0"
+#include "version.h"
 
 // #define DONT_UPLOAD
 #define DEFAULT_CONFIG_FILE "sshul.json"
@@ -34,52 +33,59 @@ static struct {
     ssh_t*      scp;
     sftp_t*     sftp;
     db_t*       db;
+    match_cb_t  mcb;
 } G;
 
-static void process_file(const char* file, int mode, uint64_t mtime, uint64_t size)
+static void _do_list_all(const char* file,
+        int mode, uint64_t mtime, uint64_t size)
 {
-    if (G.act == ACT_LIST_ALL) {
+    fprintf(stdout, "%s\n", file);
+}
+
+static void _do_list_upload(const char* file,
+        int mode, uint64_t mtime, uint64_t size)
+{
+    if (db_check(G.db, file, mtime))
         fprintf(stdout, "%s\n", file);
-        return;
-    }
+}
 
-    if (!db_check(G.db, file, mtime)) {
-        /* need do nothing, return */
-        return;
+static void _do_init(const char* file,
+        int mode, uint64_t mtime, uint64_t size)
+{
+    if (db_check(G.db, file, mtime)) {
+        fprintf(stdout, "init [%s].\n", file);
+        db_update(G.db, file, mtime);
     }
+}
 
-    if (G.act == ACT_LIST_UPLOAD) {
-        fprintf(stdout, "%s\n", file);
-        return;
-    }
-    if (G.act == ACT_DO_UPLOAD) {
-        xstr_t* remote = &G.opts.remote_path;
-        unsigned off = xstr_size(remote);
+static void _do_upload(const char* file,
+        int mode, uint64_t mtime, uint64_t size)
+{
+    xstr_t* l = &G.opts.local_path;
+    xstr_t* r = &G.opts.remote_path;
+    unsigned ol = xstr_size(l);
+    unsigned or = xstr_size(r);
 
+    if (db_check(G.db, file, mtime)) {
         fprintf(stdout, "upload [%s].\n", file);
-#ifndef DONT_UPLOAD
-        xstr_push_back(remote, '/');
-        xstr_append(remote, file, -1);
 
-        if ((G.sftp ? sftp_send_file(G.sftp, file, xstr_data(remote), mode, size)
-                : scp_send_file(G.scp, file, xstr_data(remote), mode, size)) != -1) {
+#ifndef DONT_UPLOAD
+        xstr_push_back(l, '/');
+        xstr_append(l, file, -1);
+        xstr_push_back(r, '/');
+        xstr_append(r, file, -1);
+
+        if ((G.sftp ? sftp_send_file(G.sftp, xstr_data(l), xstr_data(r), mode, size)
+                : scp_send_file(G.scp, xstr_data(l), xstr_data(r), mode, size)) != -1) {
 #endif
             db_update(G.db, file, mtime);
 #ifndef DONT_UPLOAD
         }
 
-        xstr_erase(remote, off, -1);
+        xstr_erase(l, ol, -1);
+        xstr_erase(r, or, -1);
 #endif
-        return;
     }
-    if (G.act == ACT_DO_INIT) {
-        fprintf(stdout, "init [%s].\n", file);
-        db_update(G.db, file, mtime);
-        return;
-    }
-
-    /* never reach here */
-    fprintf(stderr, "fatal error.\n");
 }
 
 #define CFG_TEMPLATE_0                          \
@@ -202,12 +208,16 @@ static int parse_args(int argc, char** argv)
                 /* opt only */
                 if (arg[0] == 'l') {
                     G.act = ACT_LIST_UPLOAD;
+                    G.mcb = _do_list_upload;
                 } else if (arg[0] == 'u') {
                     G.act = ACT_DO_UPLOAD;
+                    G.mcb = _do_upload;
                 } else if (arg[0] == 'a') {
                     G.act = ACT_LIST_ALL;
+                    G.mcb = _do_list_all;
                 } else if (arg[0] == 'i') {
                     G.act = ACT_DO_INIT;
+                    G.mcb = _do_init;
                 } else if (arg[0] == 'c') {
                     G.act = ACT_DO_CLEAN;
                 } else if (arg[0] == 't') {
@@ -320,7 +330,7 @@ int main(int argc, char** argv)
     for (xlist_iter_t it = xlist_begin(&G.opts.local_files);
             it != xlist_end(&G.opts.local_files); it = xlist_iter_next(it)) {
         match_files(xstr_data(&G.opts.local_path),
-            xstr_data((xstr_t*)xlist_iter_value(it)), process_file);
+            xstr_data((xstr_t*)xlist_iter_value(it)), G.mcb);
     }
 
     db_close(xstr_data(buf), G.db);
