@@ -255,7 +255,7 @@ int main(int argc, char** argv)
     }
 
     if (G.act == ACT_SHOW_VER) {
-        fprintf(stderr, "sshul v" VERSION_STRING ".\n");
+        fprintf(stderr, "sshul v" VERSION_STRING "\n");
         return 1;
     }
 

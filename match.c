@@ -167,7 +167,7 @@ static void match_files_rec(xstr_t* path, char* pattern,
                     && !(fattr.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
 
                 cb(xstr_data(path) + baseoff, 0644, time_win2unix(&fattr.ftLastWriteTime),
-                    (uint64_t)fattr.nFileSizeHigh | fattr.nFileSizeLow);
+                    (uint64_t)fattr.nFileSizeHigh << 32 | fattr.nFileSizeLow);
             }
 #else
             if (stat(xstr_data(path), &s) != -1 && S_ISREG(s.st_mode)) {
@@ -219,7 +219,7 @@ static void match_files_rec(xstr_t* path, char* pattern,
                         xstr_append(path, fdata.cFileName, -1);
 
                         cb(xstr_data(path) + baseoff, 0644, time_win2unix(&fdata.ftLastWriteTime),
-                            (uint64_t)fdata.nFileSizeHigh | fdata.nFileSizeLow);
+                            (uint64_t)fdata.nFileSizeHigh << 32 | fdata.nFileSizeLow);
 
                         xstr_erase(path, off, -1);
                     }
