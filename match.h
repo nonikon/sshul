@@ -9,7 +9,8 @@ typedef void (*match_cb_t)(const char* file,
 /**
  * search files in 'path' which matchs 'pattern'.
  * 'cb' is called for every matched file.
- * 'pattern' is shell-style pattern string, e.g. "*.[ch]".
+ * 'pattern' is shell-style pattern string, e.g. "*.[ch]", "*.?", "*.[a-z]".
+ * 'pattern' is also support "**", which means match all files recursively.
  * for compatibility, '\' is not recognized as file separator on windows.
  */
 void match_files(const char* path, const char* pattern, match_cb_t cb);

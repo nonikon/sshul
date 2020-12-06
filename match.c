@@ -134,10 +134,16 @@ static inline uint64_t time_win2unix(PFILETIME t)
 }
 #endif
 
-/* skip "." and "..". */
+/* ckech if equal to "." or ".." */
 static inline int is_valid_name(const char* s)
 {
     return !(s[0] == '.' && (s[1] == '\0' || (s[1] == '.' && s[2] == '\0')));
+}
+
+/* check if equal to "**" */
+static inline int is_match_all(const char* s)
+{
+    return s[0] == '*' && s[1] == '*' && s[2] == '\0';
 }
 
 /* match files recursively. */
@@ -201,7 +207,53 @@ static void match_files_rec(xstr_t* path, char* pattern,
 #else
             if (!dir) {
 #endif
-                /* 'path' not exist, break. */
+                /* 'path' not valid, break. */
+                break;
+            }
+
+            if (is_match_all(pattern)) {
+                /* pattern equal to "**", match file recursively and break. */
+#ifdef _WIN32
+                do {
+                    if (!is_valid_name(fdata.cFileName)) continue;
+
+                    off = xstr_size(path);
+                    xstr_append(path, fdata.cFileName, -1);
+
+                    if (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                        xstr_push_back(path, '/');
+                        match_files_rec(path, pattern, cb, baseoff);
+                    } else {
+                        cb(xstr_data(path) + baseoff, 0644, time_win2unix(&fdata.ftLastWriteTime),
+                            (uint64_t)fdata.nFileSizeHigh << 32 | fdata.nFileSizeLow);
+                    }
+
+                    xstr_erase(path, off, -1);
+                }
+                while (FindNextFileA(fh, &fdata));
+                FindClose(fh);
+#else
+                while (!!(ent = readdir(dir))) {
+
+                    if (!is_valid_name(ent->d_name)) continue;
+
+                    off = xstr_size(path);
+                    xstr_append(path, ent->d_name, -1);
+
+                    if (stat(xstr_data(path), &s) != -1) {
+                        if (S_ISDIR(s.st_mode)) {
+                            xstr_push_back(path, '/');
+                            match_files_rec(path, pattern, cb, baseoff);
+                        } else if (S_ISREG(s.st_mode)) {
+                            cb(xstr_data(path) + baseoff, s.st_mode & 0777,
+                                s.st_mtime, s.st_size);
+                        }
+                    }
+
+                    xstr_erase(path, off, -1);
+                }
+                closedir(dir);
+#endif
                 break;
             }
 

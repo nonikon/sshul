@@ -20,7 +20,7 @@ CP = copy
 RM = del
 else
 CP = cp
-RM = rm
+RM = rm -f
 endif
 
 OBJS = main.o match.o config.o db.o ssh_session.o \
