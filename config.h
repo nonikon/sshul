@@ -14,9 +14,10 @@ typedef struct {
     xlist_t local_files; // element type 'xstr_t'
     xstr_t  db_path;
     int     use_sftp;
-} options_t;
+    int     disable;
+} config_t;
 
-int config_load(options_t* opts, const char* file);
-void config_destroy(options_t* opts);
+int configs_load(xlist_t* cfgs, const char* file);
+void configs_destroy(xlist_t* cfgs);
 
 #endif // _CONFIG_H_

@@ -15,21 +15,8 @@
 // #define DONT_UPLOAD
 #define DEFAULT_CONFIG_FILE "sshul.json"
 
-enum {
-    ACT_NONE,
-    ACT_SHOW_VER,
-    ACT_GEN_CONFIG,
-    ACT_LIST_ALL,
-    ACT_LIST_UPLOAD,
-    ACT_DO_INIT,
-    ACT_DO_CLEAN,
-    ACT_DO_UPLOAD,
-};
-
 static struct {
-    char*       cfg;
-    options_t   opts;
-    int         act;
+    config_t*   cfg;
     ssh_t*      scp;
     sftp_t*     sftp;
     db_t*       db;
@@ -61,8 +48,8 @@ static void _do_init(const char* file,
 static void _do_upload(const char* file,
         int mode, uint64_t mtime, uint64_t size)
 {
-    xstr_t* l = &G.opts.local_path;
-    xstr_t* r = &G.opts.remote_path;
+    xstr_t* l = &G.cfg->local_path;
+    xstr_t* r = &G.cfg->remote_path;
     unsigned ol = xstr_size(l);
     unsigned or = xstr_size(r);
 
@@ -88,8 +75,8 @@ static void _do_upload(const char* file,
     }
 }
 
-#define CFG_TEMPLATE_0                          \
-    "{\n"                                       \
+#define CFG_TEMPLATE                            \
+    "[{\n"                                      \
     "    \"remote_host\": \"192.168.1.1\",\n"   \
     "    \"remote_port\": 22,\n"                \
     "    \"remote_user\": \"root\",\n"          \
@@ -97,46 +84,49 @@ static void _do_upload(const char* file,
     "    \"remote_path\": \"/tmp\",\n"          \
     "    \"local_path\": \".\",\n"              \
     "    \"local_files\": [\n"                  \
-    "        \"*.[ch]\", \".vscode/*.json\"\n"  \
+    "        \"*.[ch]\", \".vscode/**\"\n"      \
     "    ],\n"                                  \
-    "    \"db_path\": \""
- #define CFG_TEMPLATE_1                         \
-                        "\",\n"                 \
-    "    \"use_sftp\": true\n"                  \
-    "}\n"
+    "    \"db_path\": \"%s\",\n"                \
+    "    \"use_sftp\": true,\n"                 \
+    "    \"disable\": false\n"                  \
+    "}]\n"
+
 static int generate_config_file(const char* file)
 {
     int fd = open(file, O_WRONLY | O_CREAT | O_EXCL, 0644);
     int nlen;
     char name[256];
+    char buff[sizeof(CFG_TEMPLATE) + sizeof(name)];
 
     if (fd < 0) {
         fprintf(stderr, "failed open file [%s]: %s.\n",
             file, strerror(errno));
         return 1;
     }
+
 #ifdef _WIN32
     nlen = GetTempPathA(sizeof(name), name);
+
     if (nlen == 0) {
         strcpy(name, ".");
         nlen = 1;
     } else {
-        for (char* p = name; p[0]; ++p) {
+        char* p;
+        for (p = name; p[0]; ++p) {
             if (p[0] == '\\') p[0] = '/';
         }
         if (name[nlen - 1] == '/') {
             name[--nlen] = '\0';
         }
     }
+    nlen = sprintf(buff, CFG_TEMPLATE, name);
 #else
-    strcpy(name, "/tmp");
-    nlen = 4;
+    nlen = sprintf(buff, CFG_TEMPLATE, "/tmp");
 #endif
+
     fprintf(stdout, "write template config file to [%s].\n", file);
 
-    if (write(fd, CFG_TEMPLATE_0, sizeof(CFG_TEMPLATE_0) - 1) != sizeof(CFG_TEMPLATE_0) - 1
-        || write(fd, name, nlen) != nlen
-        || write(fd, CFG_TEMPLATE_1, sizeof(CFG_TEMPLATE_1) - 1) != sizeof(CFG_TEMPLATE_1) - 1) {
+    if (write(fd, buff, nlen) != nlen) {
         fprintf(stderr, "write failed: %s.\n", strerror(errno));
         close(fd);
         return 1;
@@ -147,8 +137,34 @@ static int generate_config_file(const char* file)
 }
 #undef CONFIG_TEMPLATE
 
+static int cd_to_filedir(const char* file)
+{
+    char* p;
+
+#ifdef _WIN32
+    if ((p = strrchr(file, '/')) ||
+        (p = strrchr(file, '\\'))) {
+        char* dir = _strdup(file);
+#else
+    if ((p = strrchr(file, '/'))) {
+        char* dir = strdup(file);
+#endif
+        dir[p - file] = '\0';
+
+        if (chdir(dir) != 0) {
+            fprintf(stderr, "can't cd to [%s].\n", dir);
+            free(dir);
+            return 1;
+        }
+
+        free(dir);
+    }
+
+    return 0;
+}
+
 #define DB_FILE_PREFIX  "sshul-db-"
-static void generate_db_file_name(xstr_t* s, options_t* o)
+static void generate_db_file_name(xstr_t* s, config_t* o)
 {
     md5_t ctx;
     uint8_t digest[16];
@@ -177,129 +193,30 @@ static void generate_db_file_name(xstr_t* s, options_t* o)
 }
 #undef DB_FILE_PREFIX
 
-static int parse_args(int argc, char** argv)
+static void process_config(config_t* cfg, int rmdb)
 {
-    G.cfg = DEFAULT_CONFIG_FILE;
-    G.act = ACT_NONE;
+    xstr_t buf;
+    xlist_iter_t it;
 
-    /* same as what linux 'getopt' do */
-    for (int i = 1; i < argc; ++i) {
-        char* arg = argv[i];
+    if (cfg->disable) return;
 
-        if (arg[0] != '-') {
-            /* arg only */
-            return 1;
-        } else {
-            ++arg;
-            while (arg[0]) {
-                /* opt with an arg */
-                if (arg[0] == 'f') {
-                    if (arg[1]) {
-                        arg = arg + 1;
-                    } else if (++i < argc) {
-                        arg = argv[i];
-                    } else {
-                        fprintf(stderr, "opt [-%c] need an arg.\n", arg[0]);
-                        return 1;
-                    }
-                    G.cfg = arg;
-                    break;
-                }
-                /* opt only */
-                if (arg[0] == 'l') {
-                    G.act = ACT_LIST_UPLOAD;
-                    G.mcb = _do_list_upload;
-                } else if (arg[0] == 'u') {
-                    G.act = ACT_DO_UPLOAD;
-                    G.mcb = _do_upload;
-                } else if (arg[0] == 'a') {
-                    G.act = ACT_LIST_ALL;
-                    G.mcb = _do_list_all;
-                } else if (arg[0] == 'i') {
-                    G.act = ACT_DO_INIT;
-                    G.mcb = _do_init;
-                } else if (arg[0] == 'c') {
-                    G.act = ACT_DO_CLEAN;
-                } else if (arg[0] == 't') {
-                    G.act = ACT_GEN_CONFIG;
-                } else if (arg[0] == 'v') {
-                    G.act = ACT_SHOW_VER;
-                } else if (arg[0] == 'h') {
-                    G.act = ACT_NONE;
-                } else {
-                    fprintf(stderr, "Unknown option [-%c].\n", arg[0]);
-                    return 1;
-                }
-                ++arg;
-            }
-        }
-    }
+    xstr_init(&buf, 64);
+    generate_db_file_name(&buf, cfg);
 
-    return 0;
-}
-
-int main(int argc, char** argv)
-{
-    if (parse_args(argc, argv) != 0 || G.act == ACT_NONE) {
-        fprintf(stderr, "Usage: %s [option].\n"
-            "    -l      - list the files to be uploaded.\n"
-            "    -a      - list all matched file.\n"
-            "    -u      - upload the files to be uploaded.\n"
-            "    -i      - initialize the db file.\n"
-            "    -c      - remove the db file.\n"
-            "    -t      - generate template config file.\n"
-            "    -f file - set config file. (default: " DEFAULT_CONFIG_FILE ")\n"
-            "    -v      - show version message.\n"
-            "    -h      - show this help message.\n", argv[0]);
-        return 1;
-    }
-
-    if (G.act == ACT_SHOW_VER) {
-        fprintf(stderr, "sshul v" VERSION_STRING "\n");
-        return 1;
-    }
-
-    if (G.act == ACT_GEN_CONFIG) {
-        return generate_config_file(G.cfg);
-    }
-
-    if (config_load(&G.opts, G.cfg) != 0) {
-        fprintf(stderr, "config load failed, exit.\n");
-        return 1;
-    }
-
-    char* p;
-    xstr_t* buf = xstr_new(64);
-    int rc = 1;
-
-    /* cd to config file's path */
-#ifdef _WIN32
-    if ((p = strrchr(G.cfg, '/')) ||
-        (p = strrchr(G.cfg, '\\'))) {
-#else
-    if ((p = strrchr(G.cfg, '/'))) {
-#endif
-        xstr_assign(buf, G.cfg, p - G.cfg);
-        if (chdir(xstr_data(buf)) != 0) {
-            fprintf(stderr, "can't cd to [%s].\n", xstr_data(buf));
-            goto end;
-        }
-    }
-
-    generate_db_file_name(buf, &G.opts);
-
-    if (G.act == ACT_DO_CLEAN) {
+    if (rmdb) {
         /* remove db file */
-        rc = unlink(xstr_data(buf)) < 0 ? 1 : 0;
-        if (rc)
-            fprintf(stderr, "rm [%s] failed.\n", xstr_data(buf));
+        if (unlink(xstr_data(&buf)) != 0)
+            fprintf(stderr, "rm [%s] failed.\n", xstr_data(&buf));
         else
-            fprintf(stderr, "rm [%s] done.\n", xstr_data(buf));
+            fprintf(stderr, "rm [%s] done.\n", xstr_data(&buf));
         goto end;
     }
 
+    fprintf(stderr, "[%s@%s:%s]\n", xstr_data(&cfg->remote_user),
+        xstr_data(&cfg->remote_host), xstr_data(&cfg->remote_path));
+
 #ifndef DONT_UPLOAD
-    if (G.act == ACT_DO_UPLOAD) {
+    if (G.mcb == _do_upload) {
 #ifdef _WIN32
         /* init winsocks */
         WSADATA wsData;
@@ -307,14 +224,14 @@ int main(int argc, char** argv)
 #endif
         /* build ssh session */
         G.scp = ssh_session_open(
-            xstr_data(&G.opts.remote_host), G.opts.remote_port,
-            xstr_data(&G.opts.remote_user), xstr_data(&G.opts.remote_passwd));
+            xstr_data(&cfg->remote_host), cfg->remote_port,
+            xstr_data(&cfg->remote_user), xstr_data(&cfg->remote_passwd));
         if (!G.scp) {
             fprintf(stderr, "build ssh session failed.\n");
             goto end;
         }
         /* create sftp session */
-        if (G.opts.use_sftp) {
+        if (cfg->use_sftp) {
             G.sftp = sftp_session_new(G.scp);
             if (!G.sftp) {
                 fprintf(stderr, "sftp_session_new failed, use scp instead.\n");
@@ -323,22 +240,111 @@ int main(int argc, char** argv)
     }
 #endif
 
-    rc = 0;
+    G.db = db_open(xstr_data(&buf));
+    G.cfg = cfg;
 
-    G.db = db_open(xstr_data(buf));
-
-    for (xlist_iter_t it = xlist_begin(&G.opts.local_files);
-            it != xlist_end(&G.opts.local_files); it = xlist_iter_next(it)) {
-        match_files(xstr_data(&G.opts.local_path),
+    for (it = xlist_begin(&cfg->local_files);
+            it != xlist_end(&cfg->local_files); it = xlist_iter_next(it)) {
+        match_files(xstr_data(&cfg->local_path),
             xstr_data((xstr_t*)xlist_iter_value(it)), G.mcb);
     }
 
-    db_close(xstr_data(buf), G.db);
+    fprintf(stderr, "\n");
+
+    db_close(xstr_data(&buf), G.db);
 
     sftp_session_free(G.sftp);
     ssh_session_close(G.scp);
 end:
-    xstr_free(buf);
-    config_destroy(&G.opts);
-    return rc;
+    xstr_destroy(&buf);
+}
+
+static void usage(const char* s)
+{
+    fprintf(stderr, "Usage: %s [option].\n"
+        "    -l      - list the files to be uploaded.\n"
+        "    -a      - list all matched file.\n"
+        "    -u      - upload the files to be uploaded.\n"
+        "    -i      - initialize the db file.\n"
+        "    -c      - remove the db file.\n"
+        "    -t      - generate template config file.\n"
+        "    -f file - set config file. (default: " DEFAULT_CONFIG_FILE ")\n"
+        "    -v      - show version message.\n"
+        "    -h      - show this help message.\n", s);
+}
+
+int main(int argc, char** argv)
+{
+    const char* file = DEFAULT_CONFIG_FILE;
+    int flag = 0;
+    int i;
+
+    G.mcb = NULL;
+
+    for (i = 1; i < argc; ++i) {
+        char opt;
+        char* arg;
+
+        if (argv[i][0] != '-' || argv[i][1] == '\0') {
+            fprintf(stderr, "wrong args [%s].\n", argv[i]);
+            usage(argv[0]);
+            return 1;
+        }
+
+        opt = argv[i][1];
+
+        switch (opt) {
+        case 'l': G.mcb = _do_list_upload; continue;
+        case 'u': G.mcb = _do_upload; continue;
+        case 'a': G.mcb = _do_list_all; continue;
+        case 'i': G.mcb = _do_init; continue;
+        case 'c': flag = 1; continue;
+        case 't':
+            return generate_config_file(file);
+        case 'v':
+            fprintf(stderr, "sshul v" VERSION_STRING "\n");
+            return 1;
+        case 'h':
+            usage(argv[0]);
+            return 1;
+        }
+
+        arg = argv[i][2] ? argv[i] + 2 : (++i < argc ? argv[i] : NULL);
+
+        if (arg) switch (opt) {
+        case 'f': file = arg; continue;
+        }
+
+        fprintf(stderr, "invalid option [-%c].\n", opt);
+        usage(argv[0]);
+        return 1;
+    }
+
+    if (G.mcb || flag) {
+        xlist_t cfgs;
+        xlist_iter_t iter;
+
+        /* load configs to 'cfgs' from 'file' */
+        if (configs_load(&cfgs, file) != 0) {
+            fprintf(stderr, "config load failed, exit.\n");
+            return 1;
+        }
+
+        /* cd to config file's path */
+        if (cd_to_filedir(file) != 0)
+            return 1;
+    
+        iter = xlist_begin(&cfgs);
+
+        while (iter != xlist_end(&cfgs)) {
+            process_config(xlist_iter_value(iter), flag);
+            iter = xlist_iter_next(iter);
+        }
+
+        configs_destroy(&cfgs);
+        return 0;
+    }
+
+    usage(argv[0]);
+    return 1;
 }
