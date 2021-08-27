@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2019-2021 nonikon@qq.com.
+ * All rights reserved.
+ */
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -69,7 +74,7 @@ xhash_t* xhash_init(xhash_t* xh, int size, size_t data_size,
     xh->data_size   = data_size;
     xh->size        = 0;
     xh->loadfactor  = XHASH_DEFAULT_LOADFACTOR;
-#ifndef XHASH_NO_CACHE
+#if XHASH_ENABLE_CACHE
     xh->cache       = NULL;
 #endif
     /* no check 'xh->buckets' null or not */
@@ -87,7 +92,7 @@ xhash_t* xhash_init(xhash_t* xh, int size, size_t data_size,
 void xhash_destroy(xhash_t* xh)
 {
     xhash_clear(xh);
-#ifndef XHASH_NO_CACHE
+#if XHASH_ENABLE_CACHE
     xhash_cache_free(xh);
 #endif
     free(xh->buckets);
@@ -114,7 +119,7 @@ void xhash_free(xhash_t* xh)
     if (xh)
     {
         xhash_clear(xh);
-#ifndef XHASH_NO_CACHE
+#if XHASH_ENABLE_CACHE
         xhash_cache_free(xh);
 #endif
         free(xh->buckets);
@@ -122,7 +127,7 @@ void xhash_free(xhash_t* xh)
     }
 }
 
-xhash_iter_t xhash_put(xhash_t* xh, const void* pdata)
+xhash_iter_t xhash_put_ex(xhash_t* xh, const void* pdata, size_t ksz)
 {
     unsigned hash = xh->hash_cb((void*)pdata);
     xhash_iter_t iter = xh->buckets[hash & (xh->bkt_size - 1)];
@@ -140,7 +145,7 @@ xhash_iter_t xhash_put(xhash_t* xh, const void* pdata)
         iter = iter->next;
     }
 
-#ifndef XHASH_NO_CACHE
+#if XHASH_ENABLE_CACHE
     if (xh->cache)
     {
         iter = xh->cache;
@@ -152,10 +157,10 @@ xhash_iter_t xhash_put(xhash_t* xh, const void* pdata)
         iter = malloc(sizeof(xhash_node_t) + xh->data_size);
         if (!iter)
             return NULL;
-#ifndef XHASH_NO_CACHE
+#if XHASH_ENABLE_CACHE
     }
 #endif
-    memcpy(xhash_iter_data(iter), pdata, xh->data_size);
+    memcpy(xhash_iter_data(iter), pdata, ksz);
 
     if (prev)
     {
@@ -214,7 +219,7 @@ void xhash_remove(xhash_t* xh, xhash_iter_t iter)
     if (xh->destroy_cb)
         xh->destroy_cb(xhash_iter_data(iter));
 
-#ifndef XHASH_NO_CACHE
+#if XHASH_ENABLE_CACHE
     iter->next = xh->cache;
     xh->cache = iter;
 #else
@@ -234,7 +239,9 @@ void xhash_clear(xhash_t* xh)
     {
         curr = xh->buckets[i];
 
-        while (curr)
+        if (!curr) continue;
+
+        do
         {
             next = curr->next;
 
@@ -244,6 +251,7 @@ void xhash_clear(xhash_t* xh)
 
             curr = next;
         }
+        while (curr);
 
         xh->buckets[i] = NULL;
     }
@@ -251,7 +259,7 @@ void xhash_clear(xhash_t* xh)
     xh->size = 0;
 }
 
-#ifndef XHASH_NO_CACHE
+#if XHASH_ENABLE_CACHE
 void xhash_cache_free(xhash_t* xh)
 {
     xhash_node_t* c = xh->cache;

@@ -31,16 +31,16 @@ static void _destr_cb(void* v)
 
 int db_check(db_t* db, const char* fname, uint64_t t)
 {
-    file_info_t* pf = xhash_get_ex(db, &fname);
+    file_info_t* pf = xhash_get_data(db, &fname);
 
-    return pf == XHASH_INVALID || t > pf->mtime;
+    return pf == XHASH_INVALID_DATA || t > pf->mtime;
 }
 
 int db_update(db_t* db, const char* fname, uint64_t t)
 {
-    file_info_t* pf = xhash_get_ex(db, &fname);
+    file_info_t* pf = xhash_get_data(db, &fname);
 
-    if (pf == XHASH_INVALID) {
+    if (pf == XHASH_INVALID_DATA) {
         file_info_t f;
 
         /* not exist, add */
