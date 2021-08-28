@@ -1,13 +1,17 @@
 # ssh uploader
 
 ## Build
+### Linux
 Just run command `make` if libssh2 has already installed.  
-Or run script `easybotton-build.sh` to build project with build-in libssh2 (`CMake` needed). 
+Or run script `easybotton-build.sh` to build this project with build-in libssh2 (`CMake` needed).
+### Windows
+Download [mbedtls-2.16.11](https://github.com/ARMmbed/mbedtls/archive/refs/tags/mbedtls-2.16.11.tar.gz), [libssh2-1.9.0](https://github.com/libssh2/libssh2/archive/refs/tags/libssh2-1.9.0.tar.gz) source code and extract into this folder.   
+Then, run `easybotton-build.cmd` (`CMake` and `MinGW` needed).
 
 ## Usage example
 1. run command `sshul -t` to generate tempalte config file.
     ```json
-    {
+    [{
         "remote_host": "192.168.1.1",
         "remote_port": 22,
         "remote_user": "root",
@@ -15,11 +19,14 @@ Or run script `easybotton-build.sh` to build project with build-in libssh2 (`CMa
         "remote_path": "/tmp",
         "local_path": ".",
         "local_files": [
-            "ma*.[ch]", "*/*.sh"
+            "ma*.[ch]", "*/*.sh", ".vscode/**"
         ],
         "db_path": "/tmp",
-        "use_sftp": true
-    }
+        "use_sftp": true,
+        "disable": false
+    },{
+        // ...
+    }]
     ```
 2. run command `sshul -l` to show the files to be uploaded.
     ```text
@@ -29,8 +36,8 @@ Or run script `easybotton-build.sh` to build project with build-in libssh2 (`CMa
     libssh2-1.9.0/ltmain.sh
     ```
 3. run command `sshul -u` to upload the files above to `remote_path` (/tmp).
-4. run command `sshul -l` again, nothing will be showed. `sshul -u` will upload nothing also.
-5. when some files are *modified*, `sshul -l` will show the *modified* files, and `sshul -u` will upload them also.
+4. run command `sshul -l` again, nothing will be shown. And `sshul -u` will upload nothing.
+5. when some files are *modified*, `sshul -l` will show the *modified* files, and `sshul -u` will upload them.
 
 ## TODO
 - Monitor files and upload automatically.
