@@ -1,5 +1,5 @@
-# MAKE_VERSION ?= debug
-MAKE_VERSION ?= release
+# BUILD_TYPE ?= debug
+BUILD_TYPE ?= release
 TARGET ?= sshul
 INSTALL_PATH ?= /usr/local/bin
 
@@ -7,7 +7,7 @@ CC ?= gcc
 CFLAGS ?=
 LDFLAGS ?= -lssh2
 
-ifeq ($(MAKE_VERSION), debug)
+ifeq ($(BUILD_TYPE), debug)
 _CFLAGS = -g -Wall -DDEBUG $(CFLAGS)
 _LDFLAGS = $(LDFLAGS)
 else

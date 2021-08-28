@@ -8,7 +8,7 @@
 # one of OpenSSL, Libgcrypt, mbedTLS
 CRYPTO="OpenSSL"
 # comment this line to link share 'CRYPTO' library
-LIBMBED="mbedtls-2.16.6"
+LIBMBED="mbedtls-2.16.11"
 # comment this line to link share libssh2 library
 LIBSSH2="libssh2-1.9.0"
 
@@ -25,40 +25,41 @@ fi
 if [ $LIBMBED ]; then
     # download and build static libmbedtls
 
-    MBED_INC="$PWD/$LIBMBED/include"
-    MBEDTLS_LIB="$PWD/$LIBMBED/build/library/libmbedtls.a"
-    MBEDX509_LIB="$PWD/$LIBMBED/build/library/libmbedx509.a"
-    MBEDCRYPTO_LIB="$PWD/$LIBMBED/build/library/libmbedcrypto.a"
+    MBED_ROOT="$PWD/mbedtls-$LIBMBED"
+    MBED_INC="$MBED_ROOT/include"
+    MBEDTLS_LIB="$MBED_ROOT/build/library/libmbedtls.a"
+    MBEDX509_LIB="$MBED_ROOT/build/library/libmbedx509.a"
+    MBEDCRYPTO_LIB="$MBED_ROOT/build/library/libmbedcrypto.a"
 
     # download
-    if [ ! -f $LIBMBED/CMakeLists.txt ]; then
-        if [ ! -f $LIBMBED.tgz ]; then
-            wget -O $LIBMBED.tgz https://tls.mbed.org/download/$LIBMBED-apache.tgz
+    if [ ! -f $MBED_ROOT/CMakeLists.txt ]; then
+        if [ ! -f $LIBMBED.tar.gz ]; then
+            wget https://github.com/ARMmbed/mbedtls/archive/refs/tags/$LIBMBED.tar.gz
             if [ $? -ne 0 ]; then
-                echo "download $LIBMBED.tgz failed"
+                echo "download $LIBMBED.tar.gz failed"
                 exit 1
             fi
         fi
 
-        tar -xzf $LIBMBED.tgz
+        tar -xzf $LIBMBED.tar.gz
 
-        if [ ! -f $LIBMBED/CMakeLists.txt ]; then
-            echo "unpack $LIBMBED.tgz failed"
+        if [ ! -f $MBED_ROOT/CMakeLists.txt ]; then
+            echo "unpack $LIBMBED.tar.gz failed"
             exit 1
         fi
     fi
 
     # build
     if [ ! -f $MBEDCRYPTO_LIB ]; then
-        mkdir $LIBMBED/build 2>/dev/null
-        cd $LIBMBED/build
+        mkdir $MBED_ROOT/build 2>/dev/null
+        cd $MBED_ROOT/build
 
         echo "use cmake to build libmbedtls"
         cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_PROGRAMS=OFF -DENABLE_TESTING=OFF \
             -DENABLE_ZLIB_SUPPORT=OFF -DINSTALL_MBEDTLS_HEADERS=OFF -DUSE_SHARED_MBEDTLS_LIBRARY=OFF ..
         cmake --build .
 
-        cd ../..
+        cd $PWD
 
         if [ ! -f $MBEDCRYPTO_LIB ]; then
             echo "build libmbedtls.a failed"
@@ -89,13 +90,14 @@ fi
 if [ $LIBSSH2 ]; then
     # download and build static libssh2
 
-    SSH2_INC="$PWD/$LIBSSH2/include"
-    SSH2_LIB="$PWD/$LIBSSH2/build/src/libssh2.a"
+    SSH2_ROOT="$PWD/libssh2-$LIBSSH2"
+    SSH2_INC="$SSH2_ROOT/include"
+    SSH2_LIB="$SSH2_ROOT/build/src/libssh2.a"
 
     # download
-    if [ ! -f $LIBSSH2/CMakeLists.txt ]; then
+    if [ ! -f $SSH2_ROOT/CMakeLists.txt ]; then
         if [ ! -f $LIBSSH2.tar.gz ]; then
-            wget -O $LIBSSH2.tar.gz https://www.libssh2.org/download/$LIBSSH2.tar.gz
+            wget https://github.com/libssh2/libssh2/archive/refs/tags/$LIBSSH2.tar.gz
             if [ $? -ne 0 ]; then
                 echo "download $LIBSSH2.tar.gz failed"
                 exit 1
@@ -104,7 +106,7 @@ if [ $LIBSSH2 ]; then
 
         tar -xzf $LIBSSH2.tar.gz
 
-        if [ ! -f $LIBSSH2/CMakeLists.txt ]; then
+        if [ ! -f $SSH2_ROOT/CMakeLists.txt ]; then
             echo "unpack $LIBSSH2.tar.gz failed"
             exit 1
         fi
@@ -112,8 +114,8 @@ if [ $LIBSSH2 ]; then
 
     # build
     if [ ! -f $SSH2_LIB ]; then
-        mkdir $LIBSSH2/build 2>/dev/null
-        cd $LIBSSH2/build
+        mkdir $SSH2_ROOT/build 2>/dev/null
+        cd $SSH2_ROOT/build
 
         echo "use cmake to build libssh2"
         if [ $LIBMBED ]; then
@@ -128,7 +130,7 @@ if [ $LIBSSH2 ]; then
         fi
         cmake --build .
 
-        cd ../..
+        cd $PWD
 
         if [ ! -f $SSH2_LIB ]; then
             echo "build libssh2.a failed"
@@ -145,7 +147,7 @@ fi
 echo "build sshul"
 echo "-- LDFLAGS=$LDFLAGS"
 echo "-- CFLAGS=$CFLAGS"
-make LDFLAGS="$LDFLAGS" CFLAGS="$CFLAGS" MAKE_VERSION="release"
+make LDFLAGS="$LDFLAGS" CFLAGS="$CFLAGS" BUILD_TYPE="release"
 
 if [ $? -ne 0 ]; then
     echo "build sshul failed"

@@ -1,7 +1,7 @@
 @echo off
 
-set libmbed=%~dp0%mbedtls-2.16.6
-set libssh2=%~dp0%libssh2-1.9.0
+set libmbed=%~dp0%mbedtls-mbedtls-2.16.11
+set libssh2=%~dp0libssh2-%libssh2-1.9.0
 
 where cmake > nul
 
@@ -20,7 +20,7 @@ if %errorlevel%==1 (
 )
 
 if not exist %libmbed%\CMakeLists.txt (
-    echo libmbedtls not found
+    echo %libmbed%\CMakeLists.txt not found
     pause
     exit /b 1
 )
@@ -51,7 +51,7 @@ if not exist %mbedcrypto_lib% (
 )
 
 if not exist %libssh2%\CMakeLists.txt (
-    echo libssh2 not found
+    echo %libssh2%\CMakeLists.txt not found
     pause
     exit /b 1
 )
@@ -82,7 +82,7 @@ if not exist %ssh2_lib% (
 )
 
 echo build sshul
-mingw32-make CC=gcc MAKE_VERSION=release ^
+mingw32-make CC=gcc BUILD_TYPE=release ^
      CFLAGS=-I%ssh2_inc% LDFLAGS="%ssh2_lib% %mbedcrypto_lib% -lws2_32"
 
 pause

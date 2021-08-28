@@ -2,7 +2,7 @@
 libssh2-*/
 libssh2-*.tar.gz
 mbedtls-*/
-mbedtls-*.tgz
+mbedtls-*.tar.gz
 *.a
 *.o
 sshul.exe
