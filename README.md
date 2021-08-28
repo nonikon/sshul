@@ -20,12 +20,7 @@ Then, run `easybotton-build.cmd` (`CMake` and `MinGW` needed).
         "local_path": ".",
         "local_files": [
             "ma*.[ch]", "*/*.sh", ".vscode/**"
-        ],
-        "db_path": "/tmp",
-        "use_sftp": true,
-        "disable": false
-    },{
-        // ...
+        ]
     }]
     ```
 2. run command `sshul -l` to show the files to be uploaded.
@@ -34,6 +29,7 @@ Then, run `easybotton-build.cmd` (`CMake` and `MinGW` needed).
     match.c
     match.h
     libssh2-1.9.0/ltmain.sh
+    .vscode/settings.json
     ```
 3. run command `sshul -u` to upload the files above to `remote_path` (/tmp).
 4. run command `sshul -l` again, nothing will be shown. And `sshul -u` will upload nothing.
