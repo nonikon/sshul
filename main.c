@@ -83,20 +83,12 @@ static void _do_upload(const char* file,
     "    \"remote_passwd\": \"123456\",\n"      \
     "    \"remote_path\": \"/tmp\",\n"          \
     "    \"local_path\": \".\",\n"              \
-    "    \"local_files\": [\n"                  \
-    "        \"*.[ch]\", \".vscode/**\"\n"      \
-    "    ],\n"                                  \
-    "    \"db_path\": \"%s\",\n"                \
-    "    \"use_sftp\": true,\n"                 \
-    "    \"disable\": false\n"                  \
+    "    \"local_files\": [ \"**\" ]\n"         \
     "}]\n"
 
 static int generate_config_file(const char* file)
 {
     int fd = open(file, O_WRONLY | O_CREAT | O_EXCL, 0644);
-    int nlen;
-    char name[256];
-    char buff[sizeof(CFG_TEMPLATE) + sizeof(name)];
 
     if (fd < 0) {
         fprintf(stderr, "failed open file [%s]: %s.\n",
@@ -104,29 +96,10 @@ static int generate_config_file(const char* file)
         return 1;
     }
 
-#ifdef _WIN32
-    nlen = GetTempPathA(sizeof(name), name);
-
-    if (nlen == 0) {
-        strcpy(name, ".");
-        nlen = 1;
-    } else {
-        char* p;
-        for (p = name; p[0]; ++p) {
-            if (p[0] == '\\') p[0] = '/';
-        }
-        if (name[nlen - 1] == '/') {
-            name[--nlen] = '\0';
-        }
-    }
-    nlen = sprintf(buff, CFG_TEMPLATE, name);
-#else
-    nlen = sprintf(buff, CFG_TEMPLATE, "/tmp");
-#endif
-
     fprintf(stdout, "write template config file to [%s].\n", file);
 
-    if (write(fd, buff, nlen) != nlen) {
+    if (write(fd, CFG_TEMPLATE, sizeof(CFG_TEMPLATE) - 1)
+            != sizeof(CFG_TEMPLATE) - 1) {
         fprintf(stderr, "write failed: %s.\n", strerror(errno));
         close(fd);
         return 1;
@@ -186,7 +159,32 @@ static void generate_db_file_name(xstr_t* s, config_t* o)
         str[i * 2 + 1] = "0123456789abcdef"[digest[i] & 15];
     }
 
-    xstr_assign_str(s, &o->db_path);
+    if (xstr_empty(&o->db_path)) {
+        /* get system temp path */
+#ifdef _WIN32
+        char name[256];
+        int nlen = GetTempPathA(sizeof(name), name);
+
+        if (nlen == 0) {
+            strcpy(name, ".");
+            nlen = 1;
+        } else {
+            char* p;
+            for (p = name; p[0]; ++p) {
+                if (p[0] == '\\') p[0] = '/';
+            }
+            if (name[nlen - 1] == '/') {
+                name[--nlen] = '\0';
+            }
+        }
+        xstr_assign(s, name, nlen);
+#else
+        xstr_assign(s, "/tmp", 4);
+#endif
+    } else {
+        xstr_assign_str(s, &o->db_path);
+    }
+
     xstr_push_back(s, '/');
     xstr_append(s, DB_FILE_PREFIX, sizeof(DB_FILE_PREFIX) - 1);
     xstr_append(s, str, sizeof(str));
@@ -261,16 +259,30 @@ end:
 
 static void usage(const char* s)
 {
-    fprintf(stderr, "Usage: %s [option].\n"
-        "    -l      - list the files to be uploaded.\n"
-        "    -a      - list all matched file.\n"
-        "    -u      - upload the files to be uploaded.\n"
-        "    -i      - initialize the db file.\n"
-        "    -c      - remove the db file.\n"
-        "    -t      - generate template config file.\n"
-        "    -f file - set config file. (default: " DEFAULT_CONFIG_FILE ")\n"
-        "    -v      - show version message.\n"
-        "    -h      - show this help message.\n", s);
+    fprintf(stderr, "sshul v%s, usage: %s [option]...\n"
+        "[option]:\n"
+        "  -l      - list the files to be uploaded.\n"
+        "  -a      - list all matched file.\n"
+        "  -u      - upload the files to be uploaded.\n"
+        "  -i      - initialize the db file.\n"
+        "  -c      - remove the db file.\n"
+        "  -t      - generate template config file.\n"
+        "  -f file - set config file. (default: " DEFAULT_CONFIG_FILE ")\n"
+        "  -v      - show version message.\n"
+        "  -h      - show this help message.\n", VERSION_STRING, s);
+    fprintf(stderr, "[config]:\n"
+        "  remote_host   - ssh server ip address.\n"
+        "  remote_port   - ssh server port. (default: 22)\n"
+        "  remote_user   - ssh user name.\n"
+        "  remote_passwd - ssh user password.\n"
+        "  remote_path   - the remote path which upload files to.\n"
+        "  local_path    - the local path which local files in.\n"
+        "  local_files   - the files (pattern) to be uploaded.\n"
+        "  db_path       - the local path which save db file to. (default: system temporary path)\n"
+        "  use_sftp      - use sftp or scp. (default: true)\n"
+        "  disable       - disable this config. (default: false)\n");
+    fprintf(stderr, "[pattern] example:\n"
+        "  dir/*.[ch]  dir/*/file.c  dir/**  di?/*.c dir/*.[a-z]\n");
 }
 
 int main(int argc, char** argv)

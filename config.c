@@ -131,8 +131,7 @@ static int set_config(config_t* cfg, json_value* jobj)
 
     if (xstr_empty(&cfg->remote_host) || xstr_empty(&cfg->remote_user)
             || xstr_empty(&cfg->remote_passwd) || xstr_empty(&cfg->remote_path)
-            || xlist_empty(&cfg->local_files) || xstr_empty(&cfg->local_path)
-            || xstr_empty(&cfg->db_path))
+            || xlist_empty(&cfg->local_files) || xstr_empty(&cfg->local_path))
         return -1;
 
     return 0;
