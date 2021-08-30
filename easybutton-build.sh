@@ -14,7 +14,7 @@ LIBSSH2="libssh2-1.9.0"
 
 CFLAGS=
 LDFLAGS=
-PWD=$(pwd)
+SSHUL_ROOT=$(pwd)
 
 which cmake > /dev/null
 if [ $? -ne 0 ]; then
@@ -25,7 +25,7 @@ fi
 if [ $LIBMBED ]; then
     # download and build static libmbedtls
 
-    MBED_ROOT="$PWD/mbedtls-$LIBMBED"
+    MBED_ROOT="$SSHUL_ROOT/mbedtls-$LIBMBED"
     MBED_INC="$MBED_ROOT/include"
     MBEDTLS_LIB="$MBED_ROOT/build/library/libmbedtls.a"
     MBEDX509_LIB="$MBED_ROOT/build/library/libmbedx509.a"
@@ -59,7 +59,7 @@ if [ $LIBMBED ]; then
             -DENABLE_ZLIB_SUPPORT=OFF -DINSTALL_MBEDTLS_HEADERS=OFF -DUSE_SHARED_MBEDTLS_LIBRARY=OFF ..
         cmake --build .
 
-        cd $PWD
+        cd $SSHUL_ROOT
 
         if [ ! -f $MBEDCRYPTO_LIB ]; then
             echo "build libmbedtls.a failed"
@@ -90,7 +90,7 @@ fi
 if [ $LIBSSH2 ]; then
     # download and build static libssh2
 
-    SSH2_ROOT="$PWD/libssh2-$LIBSSH2"
+    SSH2_ROOT="$SSHUL_ROOT/libssh2-$LIBSSH2"
     SSH2_INC="$SSH2_ROOT/include"
     SSH2_LIB="$SSH2_ROOT/build/src/libssh2.a"
 
@@ -130,7 +130,7 @@ if [ $LIBSSH2 ]; then
         fi
         cmake --build .
 
-        cd $PWD
+        cd $SSHUL_ROOT
 
         if [ ! -f $SSH2_LIB ]; then
             echo "build libssh2.a failed"
