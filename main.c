@@ -57,6 +57,24 @@ static void _do_upload(const char* file,
         fprintf(stdout, "upload [%s].\n", file);
 
 #ifndef DONT_UPLOAD
+        if (!G.scp) {
+            /* build ssh session */
+            G.scp = ssh_session_open(
+                xstr_data(&G.cfg->remote_host), G.cfg->remote_port,
+                xstr_data(&G.cfg->remote_user), xstr_data(&G.cfg->remote_passwd));
+            if (!G.scp) {
+                fprintf(stderr, "ssh_session_open failed.\n");
+                return;
+            }
+            /* create sftp session */
+            if (G.cfg->use_sftp) {
+                G.sftp = sftp_session_new(G.scp);
+                if (!G.sftp) {
+                    fprintf(stderr, "sftp_session_new failed, use scp instead.\n");
+                }
+            }
+        }
+
         xstr_push_back(l, '/');
         xstr_append(l, file, -1);
         xstr_push_back(r, '/');
@@ -91,7 +109,7 @@ static int generate_config_file(const char* file)
     int fd = open(file, O_WRONLY | O_CREAT | O_EXCL, 0644);
 
     if (fd < 0) {
-        fprintf(stderr, "failed open file [%s]: %s.\n",
+        fprintf(stderr, "open file [%s] failed: %s.\n",
             file, strerror(errno));
         return 1;
     }
@@ -213,31 +231,6 @@ static void process_config(config_t* cfg, int rmdb)
     fprintf(stderr, "[%s@%s:%s]\n", xstr_data(&cfg->remote_user),
         xstr_data(&cfg->remote_host), xstr_data(&cfg->remote_path));
 
-#ifndef DONT_UPLOAD
-    if (G.mcb == _do_upload) {
-#ifdef _WIN32
-        /* init winsocks */
-        WSADATA wsData;
-        WSAStartup(MAKEWORD(2, 2), &wsData);
-#endif
-        /* build ssh session */
-        G.scp = ssh_session_open(
-            xstr_data(&cfg->remote_host), cfg->remote_port,
-            xstr_data(&cfg->remote_user), xstr_data(&cfg->remote_passwd));
-        if (!G.scp) {
-            fprintf(stderr, "build ssh session failed.\n");
-            goto end;
-        }
-        /* create sftp session */
-        if (cfg->use_sftp) {
-            G.sftp = sftp_session_new(G.scp);
-            if (!G.sftp) {
-                fprintf(stderr, "sftp_session_new failed, use scp instead.\n");
-            }
-        }
-    }
-#endif
-
     G.db = db_open(xstr_data(&buf));
     G.cfg = cfg;
 
@@ -247,12 +240,16 @@ static void process_config(config_t* cfg, int rmdb)
             xstr_data((xstr_t*)xlist_iter_value(it)), G.mcb);
     }
 
-    fprintf(stderr, "\n");
-
     db_close(xstr_data(&buf), G.db);
 
-    sftp_session_free(G.sftp);
-    ssh_session_close(G.scp);
+    if (G.sftp) {
+        sftp_session_free(G.sftp);
+        G.sftp = NULL;
+    }
+    if (G.scp) {
+        ssh_session_close(G.scp);
+        G.scp = NULL;
+    }
 end:
     xstr_destroy(&buf);
 }
@@ -335,6 +332,11 @@ int main(int argc, char** argv)
     if (G.mcb || flag) {
         xlist_t cfgs;
         xlist_iter_t iter;
+#ifdef _WIN32
+        /* init winsocks */
+        WSADATA wsData;
+        WSAStartup(MAKEWORD(2, 2), &wsData);
+#endif
 
         /* load configs to 'cfgs' from 'file' */
         if (configs_load(&cfgs, file) != 0) {
@@ -345,7 +347,7 @@ int main(int argc, char** argv)
         /* cd to config file's path */
         if (cd_to_filedir(file) != 0)
             return 1;
-    
+
         iter = xlist_begin(&cfgs);
 
         while (iter != xlist_end(&cfgs)) {
