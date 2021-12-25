@@ -8,9 +8,9 @@
 # one of OpenSSL, Libgcrypt, mbedTLS
 CRYPTO="OpenSSL"
 # comment this line to link share 'CRYPTO' library
-LIBMBED="mbedtls-2.16.11"
+LIBMBED="mbedtls-2.16.12"
 # comment this line to link share libssh2 library
-LIBSSH2="libssh2-1.9.0"
+LIBSSH2="libssh2-1.10.0"
 
 CFLAGS=
 LDFLAGS=
