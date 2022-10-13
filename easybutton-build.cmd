@@ -1,7 +1,7 @@
 @echo off
 
-set libmbed=%~dp0%mbedtls-mbedtls-2.16.12
-set libssh2=%~dp0libssh2-%libssh2-1.10.0
+set libmbed=%~dp0mbedtls-mbedtls-2.16.12
+set libssh2=%~dp0libssh2-1.10.0
 
 where cmake > nul
 

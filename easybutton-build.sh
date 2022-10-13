@@ -90,14 +90,14 @@ fi
 if [ $LIBSSH2 ]; then
     # download and build static libssh2
 
-    SSH2_ROOT="$SSHUL_ROOT/libssh2-$LIBSSH2"
+    SSH2_ROOT="$SSHUL_ROOT/$LIBSSH2"
     SSH2_INC="$SSH2_ROOT/include"
     SSH2_LIB="$SSH2_ROOT/build/src/libssh2.a"
 
     # download
     if [ ! -f $SSH2_ROOT/CMakeLists.txt ]; then
         if [ ! -f $LIBSSH2.tar.gz ]; then
-            wget https://github.com/libssh2/libssh2/archive/refs/tags/$LIBSSH2.tar.gz
+            wget https://github.com/libssh2/libssh2/releases/download/$LIBSSH2/$LIBSSH2.tar.gz
             if [ $? -ne 0 ]; then
                 echo "download $LIBSSH2.tar.gz failed"
                 exit 1
