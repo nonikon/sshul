@@ -5,7 +5,7 @@
 Just run command `make` if libssh2 has already installed.  
 Or run script `easybotton-build.sh` to build this project with build-in libssh2 (`CMake` needed).
 ### Windows
-Download [mbedtls-2.16.11](https://github.com/ARMmbed/mbedtls/archive/refs/tags/mbedtls-2.16.11.tar.gz), [libssh2-1.9.0](https://github.com/libssh2/libssh2/archive/refs/tags/libssh2-1.9.0.tar.gz) source code and extract into this folder.   
+Download [mbedtls-2.16.12](https://github.com/ARMmbed/mbedtls/archive/refs/tags/mbedtls-2.16.12.tar.gz), [libssh2-1.10.0](https://github.com/libssh2/libssh2/releases/download/libssh2-1.10.0/libssh2-1.10.0.tar.gz) source code and extract into this folder.   
 Then, run `easybotton-build.cmd` (`CMake` and `MinGW` needed).
 
 ## Usage example
