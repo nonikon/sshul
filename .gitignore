@@ -1,10 +1,5 @@
-.vscode/
-libssh2-*/
-libssh2-*.tar.gz
-mbedtls-*/
-mbedtls-*.tar.gz
-*.a
-*.o
-sshul.exe
-sshul
-sshul.json
+/.vscode/
+/build/
+/libssh2-*
+/mbedtls-*
+/sshul.json

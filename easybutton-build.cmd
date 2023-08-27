@@ -1,22 +1,29 @@
 @echo off
 
-set libmbed=%~dp0mbedtls-mbedtls-2.16.12
-set libssh2=%~dp0libssh2-1.10.0
+set libmbed=%~dp0mbedtls-2.28.4
+set libssh2=%~dp0libssh2-1.11.0
+set build_type=Release
 
 where cmake > nul
-
 if %errorlevel%==1 (
     echo cmake not found
     pause
     exit /b 1
 )
 
-where mingw32-make > nul
-
+where nmake > nul
 if %errorlevel%==1 (
-    echo mingw32 not found
-    pause
-    exit /b 1
+    where mingw32-make > nul
+    if %errorlevel%==1 (
+        echo both nmake and mingw32-make not found
+        pause
+        exit /b 1
+    )
+    set usenmake=0
+    set cmakegen="MinGW Makefiles"
+) else (
+    set usenmake=1
+    set cmakegen="NMake Makefiles"
 )
 
 if not exist %libmbed%\CMakeLists.txt (
@@ -26,9 +33,15 @@ if not exist %libmbed%\CMakeLists.txt (
 )
 
 set mbed_inc=%libmbed%\include
-set mbedtls_lib=%libmbed%\build\library\libmbedtls.a
-set mbedx509_lib=%libmbed%\build\library\libmbedx509.a
-set mbedcrypto_lib=%libmbed%\build\library\libmbedcrypto.a
+if %usenmake%==1 (
+    set mbedtls_lib=%libmbed%\build\library\mbedtls.lib
+    set mbedx509_lib=%libmbed%\build\library\mbedx509.lib
+    set mbedcrypto_lib=%libmbed%\build\library\mbedcrypto.lib
+) else (
+    set mbedtls_lib=%libmbed%\build\library\libmbedtls.a
+    set mbedx509_lib=%libmbed%\build\library\libmbedx509.a
+    set mbedcrypto_lib=%libmbed%\build\library\libmbedcrypto.a
+)
 
 if not exist %mbedcrypto_lib% (
     echo build mbedtls
@@ -36,7 +49,7 @@ if not exist %mbedcrypto_lib% (
     mkdir %libmbed%\build > nul
     cd %libmbed%\build
 
-    cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release ^
+    cmake -G %cmakegen% -DCMAKE_BUILD_TYPE=%build_type% ^
         -DENABLE_PROGRAMS=OFF -DENABLE_TESTING=OFF -DENABLE_ZLIB_SUPPORT=OFF ^
         -DINSTALL_MBEDTLS_HEADERS=OFF -DUSE_SHARED_MBEDTLS_LIBRARY=OFF ..
     cmake --build .
@@ -57,7 +70,11 @@ if not exist %libssh2%\CMakeLists.txt (
 )
 
 set ssh2_inc=%libssh2%\include
-set ssh2_lib=%libssh2%\build\src\libssh2.a
+if %usenmake%==1 (
+    set ssh2_lib=%libssh2%\build\src\libssh2.lib
+) else (
+    set ssh2_lib=%libssh2%\build\src\libssh2.a
+)
 
 if not exist %ssh2_lib% (
     echo build libssh2
@@ -65,7 +82,7 @@ if not exist %ssh2_lib% (
     mkdir %libssh2%\build > nul
     cd %libssh2%\build
 
-    cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF ^
+    cmake -G %cmakegen% -DCMAKE_BUILD_TYPE=%build_type% -DBUILD_SHARED_LIBS=OFF ^
         -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DENABLE_DEBUG_LOGGING=OFF ^
         -DCLEAR_MEMORY=OFF -DENABLE_ZLIB_COMPRESSION=OFF -DCRYPTO_BACKEND=mbedTLS ^
         -DMBEDTLS_INCLUDE_DIR=%mbed_inc% -DMBEDTLS_LIBRARY=%mbedtls_lib% ^
@@ -82,7 +99,14 @@ if not exist %ssh2_lib% (
 )
 
 echo build sshul
-mingw32-make CC=gcc BUILD_TYPE=release ^
-     CFLAGS=-I%ssh2_inc% LDFLAGS="%ssh2_lib% %mbedcrypto_lib% -lws2_32"
+
+if not exist build (
+    mkdir build
+    cd build
+    cmake -G %cmakegen% -DCMAKE_BUILD_TYPE=%build_type% -DLIBSSH2_INCPATH=%ssh2_inc% ^
+        -DLIBSSH2_LIBPATH=%libssh2%\build\src -DLIBMBED_LIBPATH=%libmbed%\build\library ..
+    cd ..
+)
+cmake --build build
 
 pause
