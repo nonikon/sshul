@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 nonikon@qq.com.
+ * Copyright (C) 2019-2023 nonikon@qq.com.
  * All rights reserved.
  */
 
@@ -7,133 +7,208 @@
 #define _XSTRING_H_
 
 #include <stddef.h>
-
-/* similar to C++ std::string library. */
+#include <string.h>
+#include <assert.h>
 
 #ifdef HAVE_XCONFIG_H
 #include "xconfig.h"
 #else
 
-/* enable xultoa/xatoul/... interface or not. */
 #ifndef XSTR_ENABLE_EXTRA
 #define XSTR_ENABLE_EXTRA       1
 #endif
 
 #ifndef XSTR_DEFAULT_CAPACITY
-#define XSTR_DEFAULT_CAPACITY   32
+#define XSTR_DEFAULT_CAPACITY   64
 #endif
 
 #endif
 
 typedef struct xstr xstr_t;
 
-struct xstr
-{
-    char*   data;
-    size_t  size;
-    size_t  capacity;
+struct xstr {
+    char* data;
+    size_t size;
+    size_t capacity;
 };
 
-/* initialize a 'xstr_t' with 'capacity'. 'capacity' <= 0 means default. */
-xstr_t* xstr_init(xstr_t* xs, int capacity);
-/* initialize a 'xstr_t' with 'cstr'. 'size' < 0 means 'strlen(cstr)'. */
-xstr_t* xstr_init_with(xstr_t* xs, const char* cstr, int size);
-/* destroy a 'xstr_t' which has called 'xstr_init*'. */
+void __xstr_capacity_expand(xstr_t* xs, size_t extra);
+
+static inline void __xstr_ensure_capacity(xstr_t* xs, size_t extra) {
+    /* 1 byte null-terminated */
+    if (xs->size + extra + 1 > xs->capacity) {
+        __xstr_capacity_expand(xs, extra + 1);
+    }
+}
+
+void xstr_init_ex(xstr_t* xs, size_t capacity);
+
+static inline void xstr_init(xstr_t* xs) {
+    xstr_init_ex(xs, XSTR_DEFAULT_CAPACITY);
+}
+
+void xstr_init_with_ex(xstr_t* xs, const char* cstr, size_t size);
+
+static inline void xstr_init_with(xstr_t* xs, const char* cstr) {
+    xstr_init_with_ex(xs, cstr, strlen(cstr));
+}
+
+/* <xs> must be a pointer returned by <xstr_init_xxx>. */
 void xstr_destroy(xstr_t* xs);
 
-/* allocate memory for a 'xstr_t' and initialize it with 'capacity'.
- * 'capacity' <= 0 means default. */
-xstr_t* xstr_new(int capacity);
-/* allocate memory for a 'xstr_t' and initialize it with 'cstr'.
- * 'size' < 0 means 'strlen(cstr)'. */
-xstr_t* xstr_new_with(const char* cstr, int size);
-/* release memory for a 'xstr_t' which 'xstr_new*' returns. */
+xstr_t* xstr_new_ex(size_t capacity);
+
+static inline xstr_t* xstr_new() {
+    return xstr_new_ex(XSTR_DEFAULT_CAPACITY);
+}
+
+xstr_t* xstr_new_with_ex(const char* cstr, size_t size);
+
+static inline xstr_t* xstr_new_with(const char* cstr) {
+    return xstr_new_with_ex(cstr, strlen(cstr));
+}
+
+/* <xs> must be a pointer returned by <xstr_new_xxx>. */
 void xstr_free(xstr_t* xs);
 
-/* allocate memory for a 'xstr_t' and initialize it with 'xs'. */
-#define xstr_new_with_str(xs) \
-            xstr_new_with(xstr_data(xs), xstr_size(xs))
+static inline void xstr_append_ex(xstr_t* xs, const char* cstr, size_t size) {
+    __xstr_ensure_capacity(xs, size);
+    memcpy(xs->data + xs->size, cstr, size);
+    xs->size += size;
+    xs->data[xs->size] = '\0';
+}
 
-/* return a pointer to the first character. */
-#define xstr_data(xs)       ((xs)->data)
-/* accesse the first character. */
-#define xstr_front(xs)      ((xs)->data[0])
-/* accesse the last character, 'xs->size' must > 0. */
-#define xstr_back(xs)       ((xs)->data[(xs)->size - 1])
-/* check whether the 'xstr_t' is empty. */
-#define xstr_empty(xs)      ((xs)->size == 0)
-/* return the number of characters. */
-#define xstr_size(xs)       ((xs)->size)
-/* return the number of characters that can be held in currently allocated storage. */
-#define xstr_capacity(xs)   ((xs)->capacity)
+static inline void xstr_append(xstr_t* xs, const char* cstr) {
+    xstr_append_ex(xs, cstr, strlen(cstr));
+}
 
-/* assign characters to a 'xstr_t' beginning at 'pos'.
- * 'pos' must <= 'xs->size'. 'size' < 0 means 'strlen(cstr)'. */
-void xstr_assign_at(xstr_t* xs, size_t pos, const char* cstr, int size);
-/* append characters to the end. 'size' < 0 means 'strlen(cstr)'. */
-void xstr_append(xstr_t* xs, const char* cstr, int size);
-/* insert characters at 'pos'. 'pos' must <= 'xs->size'.
- * 'size' < 0 means 'strlen(cstr)'. */
-void xstr_insert(xstr_t* xs, size_t pos, const char* cstr, int size);
-/* remove 'count' characters starting at 'pos'.
- * 'pos' must <= 'xs->size'. 'count' < 0 means end of 'xs'. */
-void xstr_erase(xstr_t* xs, size_t pos, int count);
-/* clear the contents. */
-void xstr_clear(xstr_t* xs);
+static inline void xstr_assign_at_ex(xstr_t* xs, size_t pos, const char* cstr, size_t size) {
+    assert(pos <= xs->size);
+    xs->size = pos;
+    xstr_append_ex(xs, cstr, size);
+}
 
-/* assign characters to a 'xstr_t'. */
-#define xstr_assign(xs, cstr, sz)   xstr_assign_at(xs, 0, cstr, sz)
-/* prepend characters to a 'xstr_t'. */
-#define xstr_prepend(xs, cstr, sz)  xstr_insert(xs, 0, cstr, sz)
+static inline void xstr_assign_at(xstr_t* xs, size_t pos, const char* cstr) {
+    xstr_assign_at_ex(xs, pos, cstr, strlen(cstr));
+}
 
-/* append a character to the end. */
-void xstr_push_back(xstr_t* xs, char ch);
-/* remove the last character. 'xs->size' must > 0. */
-void xstr_pop_back(xstr_t* xs);
+static inline void xstr_insert_ex(xstr_t* xs, size_t pos, const char* cstr, size_t size) {
+    assert(pos <= xs->size);
+    __xstr_ensure_capacity(xs, size);
+    memmove(xs->data + pos + size, xs->data + pos, xs->size - pos); /* >>> */
+    memcpy(xs->data + pos, cstr, size);
+    xs->size += size;
+    xs->data[xs->size] = '\0';
+}
 
-/* append 'src' (xstr_t) to 'dest' (xstr_t). */
-#define xstr_append_str(dest, src) \
-            xstr_append(dest, xstr_data(src), xstr_size(src))
-/* prepend 'src' (xstr_t) to 'dest' (xstr_t). */
-#define xstr_prepend_str(dest, src) \
-            xstr_prepend(dest, xstr_data(src), xstr_size(src))
-/* assign 'src' (xstr_t) to 'dest' (xstr_t). */
-#define xstr_assign_str(dest, src) \
-            xstr_assign(dest, xstr_data(src), xstr_size(src))
-/* assign 'src' (xstr_t) to 'dest' (xstr_t) at 'pos'. */
-#define xstr_assign_str_at(dest, pos, src) \
-            xstr_assign_at(dest, pos, xstr_data(src), xstr_size(src))
-/* insert 'src' (xstr_t) to 'dest' (xstr_t) at 'pos'. */
-#define xstr_insert_str(dest, pos, src) \
-            xstr_insert(dest, pos, xstr_data(src), xstr_size(src))
+static inline void xstr_insert(xstr_t* xs, size_t pos, const char* cstr) {
+    xstr_insert_ex(xs, pos, cstr, strlen(cstr));
+}
+
+static inline void xstr_erase(xstr_t* xs, size_t pos, size_t count) {
+    assert(pos + count <= xs->size);
+    xs->size -= count;
+    memmove(xs->data + pos, xs->data + pos + count, xs->size - pos); /* <<< */
+    xs->data[xs->size] = '\0';
+}
+
+static inline void xstr_erase_after(xstr_t* xs, size_t pos) {
+    assert(pos <= xs->size);
+    xs->size = pos;
+    xs->data[pos] = '\0';
+}
+
+static inline void xstr_clear(xstr_t* xs) {
+    xstr_erase_after(xs, 0);
+}
+
+static inline void xstr_assign_ex(xstr_t* xs, const char* cstr, size_t size) {
+    xstr_assign_at_ex(xs, 0, cstr, size);
+}
+
+static inline void xstr_assign(xstr_t* xs, const char* cstr) {
+    xstr_assign_ex(xs, cstr, strlen(cstr));
+}
+
+static inline void xstr_prepend_ex(xstr_t* xs, const char* cstr, size_t size) {
+    xstr_insert_ex(xs, 0, cstr, size);
+}
+
+static inline void xstr_prepend(xstr_t* xs, const char* cstr) {
+    xstr_prepend_ex(xs, cstr, strlen(cstr));
+}
+
+static inline void xstr_push_back(xstr_t* xs, char ch) {
+    __xstr_ensure_capacity(xs, 1);
+    xs->data[xs->size++] = ch;
+    xs->data[xs->size] = '\0';
+}
+
+static inline void xstr_pop_back(xstr_t* xs) {
+    assert(xs->size > 0);
+    xs->data[--xs->size] = '\0';
+}
+
+static inline void xstr_append_str(xstr_t* dest, xstr_t* src) {
+    xstr_append_ex(dest, src->data, src->size);
+}
+
+static inline void xstr_prepend_str(xstr_t* dest, xstr_t* src) {
+    xstr_prepend_ex(dest, src->data, src->size);
+}
+
+static inline void xstr_assign_str(xstr_t* dest, xstr_t* src) {
+    xstr_assign_ex(dest, src->data, src->size);
+}
+
+static inline void xstr_assign_str_at(xstr_t* dest, size_t pos, xstr_t* src) {
+    xstr_assign_at_ex(dest, pos, src->data, src->size);
+}
+
+static inline void xstr_insert_str(xstr_t* dest, size_t pos, xstr_t* src) {
+    xstr_insert_ex(dest, pos, src->data, src->size);
+}
+
+static inline char* xstr_data(xstr_t* xs) {
+    return xs->data;
+}
+
+static inline char xstr_front(xstr_t* xs) {
+    return xs->data[0];
+}
+
+static inline char xstr_back(xstr_t* xs) {
+    return xs->data[xs->size - 1];
+}
+
+static inline int xstr_empty(xstr_t* xs) {
+    return xs->size == 0;
+}
+
+static inline size_t xstr_size(xstr_t* xs) {
+    return xs->size;
+}
+
+static inline size_t xstr_capacity(xstr_t* xs) {
+    return xs->capacity;
+}
 
 #if XSTR_ENABLE_EXTRA
-extern const char g_xstr_i2c_table[];
-extern const unsigned char g_xstr_c2i_table[];
 
-/* unsigned long -> string, return a pointer pointed to 'buf'.
- * 'buf' size 36 may be the best.
+/* unsigned long -> string, return a pointer pointed to <buf>.
+ * <buf> size 36 may be the best.
  * radix: 2 ~ 36.
  * ex:
  *     val = 65535, radix = 10 -> buf = "65535".
- *     val = 65535, radix = 16 -> buf = "FFFF". */
+ *     val = 65535, radix = 16 -> buf = "FFFF".
+ */
 char* xultoa(char* buf, unsigned long val, unsigned radix);
-/* unsigned char -> hex string, return a pointer pointed to 'buf'. */
-static inline void xuctoa_hex(char buf[2], unsigned char val)
-{
-    buf[0] = g_xstr_i2c_table[val >> 4];
-    buf[1] = g_xstr_i2c_table[val & 15];
-}
 
-/* string -> unsigned long. similar to 'strtol'.
- * base: 2 ~ 36. */
+/* string -> unsigned long. similar to <strtol>.
+ * base: 2 ~ 36.
+ */
 unsigned long xatoul(const char* str, char** ep, unsigned base);
-/* hex string -> unsigned char. */
-static inline unsigned char xatouc_hex(const char str[2])
-{
-    return g_xstr_c2i_table[(unsigned char)str[1]]
-            | (g_xstr_c2i_table[(unsigned char)str[0]] << 4);
-}
+
 #endif // XSTR_ENABLE_EXTRA
 
 #endif // _XSTRING_H_

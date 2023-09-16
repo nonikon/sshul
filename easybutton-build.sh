@@ -4,13 +4,16 @@
 
 # comment this line to link share mbedtls library
 LIBMBED_VER="2.28.4"
+# comment this line to link share zlib library
+LIBZLIB_VER="1.3"
 # comment this line to link share libssh2 library
 LIBSSH2_VER="1.11.0"
 # build Release or Debug
 BUILD_TYPE=Release
 
-CMAKE_EXTRA_ARGS=
 SSHUL_ROOT=$(pwd)
+SSHUL_CMAKE_EXTARGS=
+SSH2_CMAKE_EXTARGS=
 
 which cmake > /dev/null
 if [ $? -ne 0 ]; then
@@ -63,7 +66,55 @@ if [ $LIBMBED_VER ]; then
         fi
     fi
 
-    CMAKE_EXTRA_ARGS="-DLIBMBED_LIBPATH=$MBED_ROOT/build/library $CMAKE_EXTRA_ARGS"
+    SSHUL_CMAKE_EXTARGS="-DLIBMBED_LIBPATH=$MBED_ROOT/build/library $SSHUL_CMAKE_EXTARGS"
+    SSH2_CMAKE_EXTARGS="-DMBEDTLS_INCLUDE_DIR=$MBED_INC -DMBEDTLS_LIBRARY=$MBEDTLS_LIB \
+-DMBEDX509_LIBRARY=$MBEDX509_LIB -DMBEDCRYPTO_LIBRARY=$MBEDCRYPTO_LIB $SSH2_CMAKE_EXTARGS"
+fi
+
+if [ $LIBZLIB_VER ]; then
+    # download and build static zlib
+
+    ZLIB_ROOT="$SSHUL_ROOT/zlib-$LIBZLIB_VER"
+    ZLIB_INC="$ZLIB_ROOT/build/include"
+    ZLIB_LIB="$ZLIB_ROOT/build/lib/libz.a"
+
+    # download
+    if [ ! -f $ZLIB_ROOT/CMakeLists.txt ]; then
+        if [ ! -f zlib-$LIBZLIB_VER.tar.xz ]; then
+            wget https://www.zlib.net/zlib-$LIBZLIB_VER.tar.xz
+            if [ $? -ne 0 ]; then
+                echo "download zlib-$LIBZLIB_VER.tar.xz failed"
+                exit 1
+            fi
+        fi
+
+        tar xf zlib-$LIBZLIB_VER.tar.xz
+
+        if [ ! -f $ZLIB_ROOT/CMakeLists.txt ]; then
+            echo "unpack zlib-$LIBZLIB_VER.tar.xz failed"
+            exit 1
+        fi
+    fi
+
+    # build
+    if [ ! -f $ZLIB_LIB ]; then
+        mkdir $ZLIB_ROOT/build 2>/dev/null
+        cd $ZLIB_ROOT/build
+
+        echo "use cmake to build zlib"
+        cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_INSTALL_PREFIX=$ZLIB_ROOT/build -DSKIP_INSTALL_FILES=ON ..
+        cmake --build . && cmake --install . && rm $ZLIB_ROOT/build/lib/libz.so*
+
+        cd $SSHUL_ROOT
+
+        if [ ! -f $ZLIB_LIB ]; then
+            echo "build libz.a failed"
+            exit 1
+        fi
+    fi
+
+    SSHUL_CMAKE_EXTARGS="-DLIBZLIB_LIBPATH=$ZLIB_ROOT/build/lib $SSHUL_CMAKE_EXTARGS"
+    SSH2_CMAKE_EXTARGS="-DZLIB_ROOT=$ZLIB_ROOT/build $SSH2_CMAKE_EXTARGS"
 fi
 
 if [ $LIBSSH2_VER ]; then
@@ -97,16 +148,9 @@ if [ $LIBSSH2_VER ]; then
         cd $SSH2_ROOT/build
 
         echo "use cmake to build libssh2"
-        if [ $LIBMBED_VER ]; then
-            cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_SHARED_LIBS=OFF -DBUILD_EXAMPLES=OFF \
-                -DBUILD_TESTING=OFF -DENABLE_DEBUG_LOGGING=OFF -DCLEAR_MEMORY=OFF \
-                -DENABLE_ZLIB_COMPRESSION=OFF -DCRYPTO_BACKEND=mbedTLS -DMBEDTLS_INCLUDE_DIR=$MBED_INC \
-                -DMBEDTLS_LIBRARY=$MBEDTLS_LIB -DMBEDX509_LIBRARY=$MBEDX509_LIB -DMBEDCRYPTO_LIBRARY=$MBEDCRYPTO_LIB ..
-        else
-            cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_SHARED_LIBS=OFF -DBUILD_EXAMPLES=OFF \
-                -DBUILD_TESTING=OFF -DENABLE_DEBUG_LOGGING=OFF -DCLEAR_MEMORY=OFF \
-                -DENABLE_ZLIB_COMPRESSION=OFF -DCRYPTO_BACKEND=mbedTLS ..
-        fi
+        cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_SHARED_LIBS=OFF -DBUILD_EXAMPLES=OFF \
+            -DBUILD_TESTING=OFF -DENABLE_DEBUG_LOGGING=OFF -DCLEAR_MEMORY=OFF \
+            -DENABLE_ZLIB_COMPRESSION=ON -DCRYPTO_BACKEND=mbedTLS $SSH2_CMAKE_EXTARGS ..
         cmake --build .
 
         cd $SSHUL_ROOT
@@ -117,15 +161,15 @@ if [ $LIBSSH2_VER ]; then
         fi
     fi
 
-    CMAKE_EXTRA_ARGS="-DLIBSSH2_INCPATH=$SSH2_INC -DLIBSSH2_LIBPATH=$SSH2_ROOT/build/src $CMAKE_EXTRA_ARGS"
+    SSHUL_CMAKE_EXTARGS="-DLIBSSH2_INCPATH=$SSH2_INC -DLIBSSH2_LIBPATH=$SSH2_ROOT/build/src $SSHUL_CMAKE_EXTARGS"
 fi
 
 echo "build sshul"
-if [ ! -d build ]; then
-    mkdir build 
+if [ ! -d build/CMakeCache.txt ]; then
+    mkdir -p build 
     cd build
-    # echo "-- $CMAKE_EXTRA_ARGS"
-    cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_SKIP_RPATH=TRUE $CMAKE_EXTRA_ARGS ..
+    # echo "-- $SSHUL_CMAKE_EXTARGS"
+    cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_SKIP_RPATH=TRUE $SSHUL_CMAKE_EXTARGS ..
     cd ..
 fi
 cmake --build build

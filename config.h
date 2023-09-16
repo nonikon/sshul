@@ -2,22 +2,21 @@
 #define _CONFIG_H_
 
 #include "xlist.h"
-#include "xstring.h"
 
 typedef struct {
-    xstr_t  remote_host;
-    int     remote_port;
-    xstr_t  remote_user;
-    xstr_t  remote_passwd;
-    xstr_t  remote_path;
-    xstr_t  local_path;
-    xlist_t local_files; // element type 'xstr_t'
-    xstr_t  db_path;
-    int     use_sftp;
-    int     disable;
+    char* label;
+    char* remote_host;
+    int remote_port;
+    char* remote_user;
+    char* remote_passwd;
+    char* remote_path;
+    char* local_path;
+    char** ignore_files; // End with <NULL>
+    int follow_link;
+    int use_compress;
 } config_t;
 
-int configs_load(xlist_t* cfgs, const char* file);
+xlist_t* configs_load(const char* file);
 void configs_destroy(xlist_t* cfgs);
 
 #endif // _CONFIG_H_

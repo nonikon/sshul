@@ -2,4 +2,5 @@
 /build/
 /libssh2-*
 /mbedtls-*
+/zlib-*
 /sshul.json

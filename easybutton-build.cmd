@@ -2,6 +2,7 @@
 
 set libmbed=%~dp0mbedtls-2.28.4
 set libssh2=%~dp0libssh2-1.11.0
+set libzlib=%~dp0zlib-1.3
 set build_type=Release
 
 where cmake > nul
@@ -25,6 +26,8 @@ if %errorlevel%==1 (
     set usenmake=1
     set cmakegen="NMake Makefiles"
 )
+
+@REM builld libmbedtls
 
 if not exist %libmbed%\CMakeLists.txt (
     echo %libmbed%\CMakeLists.txt not found
@@ -63,6 +66,44 @@ if not exist %mbedcrypto_lib% (
     )
 )
 
+@REM build zlib
+
+if not exist %libzlib%\CMakeLists.txt (
+    echo %libzlib%\CMakeLists.txt not found
+    pause
+    exit /b 1
+)
+
+set zlib_inc=%libzlib%\build\include
+if %usenmake%==1 (
+    set zlib_lib=%libzlib%\build\lib\zlibstatic.lib
+) else (
+    @REM TODO
+    set zlib_lib=%libzlib%\build\lib\libz.a
+)
+
+if not exist %zlib_lib% (
+    echo build zlib
+
+    mkdir %libzlib%\build > nul
+    cd %libzlib%\build
+
+    cmake -G %cmakegen% -DCMAKE_BUILD_TYPE=%build_type% ^
+        -DCMAKE_INSTALL_PREFIX=%libzlib%\build -DSKIP_INSTALL_FILES=ON ..
+    cmake --build .
+    cmake --install .
+
+    cd ..\..
+
+    if not exist %zlib_lib% (
+        echo build zlib failed
+        pause
+        exit /b 1
+    )
+)
+
+@REM build libssh2
+
 if not exist %libssh2%\CMakeLists.txt (
     echo %libssh2%\CMakeLists.txt not found
     pause
@@ -84,9 +125,10 @@ if not exist %ssh2_lib% (
 
     cmake -G %cmakegen% -DCMAKE_BUILD_TYPE=%build_type% -DBUILD_SHARED_LIBS=OFF ^
         -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DENABLE_DEBUG_LOGGING=OFF ^
-        -DCLEAR_MEMORY=OFF -DENABLE_ZLIB_COMPRESSION=OFF -DCRYPTO_BACKEND=mbedTLS ^
+        -DCLEAR_MEMORY=OFF -DENABLE_ZLIB_COMPRESSION=ON -DCRYPTO_BACKEND=mbedTLS ^
         -DMBEDTLS_INCLUDE_DIR=%mbed_inc% -DMBEDTLS_LIBRARY=%mbedtls_lib% ^
-        -DMBEDX509_LIBRARY=%mbedx509_lib% -DMBEDCRYPTO_LIBRARY=%mbedcrypto_lib% ..
+        -DMBEDX509_LIBRARY=%mbedx509_lib% -DMBEDCRYPTO_LIBRARY=%mbedcrypto_lib% ^
+        -DZLIB_ROOT=%libzlib%\build ..
     cmake --build .
 
     cd ..\..
@@ -100,11 +142,12 @@ if not exist %ssh2_lib% (
 
 echo build sshul
 
-if not exist build (
+if not exist build\CMakeCache.txt (
     mkdir build
     cd build
     cmake -G %cmakegen% -DCMAKE_BUILD_TYPE=%build_type% -DLIBSSH2_INCPATH=%ssh2_inc% ^
-        -DLIBSSH2_LIBPATH=%libssh2%\build\src -DLIBMBED_LIBPATH=%libmbed%\build\library ..
+        -DLIBSSH2_LIBPATH=%libssh2%\build\src -DLIBMBED_LIBPATH=%libmbed%\build\library ^
+        -DLIBZLIB_LIBPATH=%libzlib%\build\lib ..
     cd ..
 )
 cmake --build build

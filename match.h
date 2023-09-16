@@ -2,17 +2,28 @@
 #define _MATCH_H_
 
 #include <stdint.h>
+#include <time.h>
+#include <libssh2_sftp.h>
 
-typedef void (*match_cb_t)(const char* file,
-                int mode, uint64_t mtime, uint64_t size);
+#include "xlist.h"
 
-/**
- * search files in 'path' which matchs 'pattern'.
- * 'cb' is called for every matched file.
- * 'pattern' is shell-style pattern string, e.g. "*.[ch]", "*.?", "*.[a-z]".
- * 'pattern' is also support "**", which means match all files recursively.
- * for compatibility, '\' is not recognized as file separator on windows.
+typedef struct {
+    char* file;
+    int mode;
+    time_t mtime;
+    uint64_t size;
+    /* extra */
+    int is_newer;
+    int is_exist;
+} file_item_t;
+
+/* <ignores> is shell-style pattern strings, e.g. "*.[ch]", "*.?", "*.[a-z]".
+ * for compatibility, '\' is not recognized as file separator on Windows.
  */
-void match_files(const char* path, const char* pattern, match_cb_t cb);
+xlist_t* iterate_directory(const char* path, char* const ignores[],
+        int follnk, LIBSSH2_SFTP* sftp);
+void iterate_directory_setextra(xlist_t* items, const char* path,
+        int follnk, LIBSSH2_SFTP* sftp);
+void iterate_directory_free(xlist_t* items);
 
 #endif // _MATCH_H_

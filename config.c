@@ -7,134 +7,150 @@
 
 #define CONFIG_FILE_MAXSZ   2048
 
-static void on_xstr_free(void* pvalue)
-{
-    xstr_destroy(pvalue);
-}
+static char* const __dummy_label = ""; 
+static char* __dummy_ignoref;
 
 static void init_config(config_t* cfg)
 {
-    xstr_init(&cfg->remote_host, 36);
+    memset(cfg, 0, sizeof(config_t));
     cfg->remote_port = 22;
-    xstr_init(&cfg->remote_user, 16);
-    xstr_init(&cfg->remote_passwd, 16);
-    xstr_init(&cfg->remote_path, 128);
-    xstr_init(&cfg->local_path, 128);
-    xstr_init(&cfg->db_path, 128);
-    cfg->use_sftp = 1; /* default use 'sftp' */
-    cfg->disable = 0;
-    xlist_init(&cfg->local_files, sizeof(xstr_t), on_xstr_free);
+    // cfg->follow_link = 0;
+    // cfg->use_compress = 0;
 }
 
 static void destroy_config(void* v)
 {
     config_t* cfg = v;
 
-    xstr_destroy(&cfg->remote_host);
-    xstr_destroy(&cfg->remote_user);
-    xstr_destroy(&cfg->remote_passwd);
-    xstr_destroy(&cfg->remote_path);
-    xstr_destroy(&cfg->local_path);
-    xstr_destroy(&cfg->db_path);
-    xlist_destroy(&cfg->local_files);
+    if (cfg->label != __dummy_label) {
+        free(cfg->label);
+    }
+    free(cfg->remote_host);
+    free(cfg->remote_user);
+    free(cfg->remote_passwd);
+    free(cfg->remote_path);
+    free(cfg->local_path);
+
+    if (cfg->ignore_files && cfg->ignore_files != &__dummy_ignoref) {
+        for (int i = 0; cfg->ignore_files[i]; ++i) {
+            free(cfg->ignore_files[i]);
+        }
+        free(cfg->ignore_files);
+    }
 }
 
-static int set_local_files(xlist_t* files, json_value* jarr)
+static char* jstrdup(const json_value* js)
 {
-    json_value* jval;
-    xstr_t file;
-    int i;
+    char* str = malloc(json_get_string_length(js) + 1);
+    memcpy(str, json_get_string(js), json_get_string_length(js) + 1);
+    return str;
+}
 
-    for (i = 0; i < json_get_array_length(jarr); ++i) {
-        jval = json_get_array_value(jarr, i);
+static int set_ignore_files(config_t* cfg, json_value* jarr)
+{
+    const unsigned n = json_get_array_length(jarr);
+
+    cfg->ignore_files = malloc((n + 1) * sizeof(char*));
+    memset(cfg->ignore_files, 0, (n + 1) * sizeof(char*));
+
+    for (unsigned i = 0; i < n; ++i) {
+        json_value* jval = json_get_array_value(jarr, i);
 
         if (json_get_type(jval) != json_string) {
+            fprintf(stderr, "invalid config value in <ignore_files>.\n");
             return -1;
         }
-
-        xstr_init_with(&file, json_get_string(jval),
-            json_get_string_length(jval));
-
-        xlist_push_back(files, &file);
+        cfg->ignore_files[i] = jstrdup(jval);
     }
-
     return 0;
 }
 
 static int set_config(config_t* cfg, json_value* jobj)
 {
-    char* name;
-    json_value* value;
-    int i;
+    for (unsigned i = 0; i < json_get_object_length(jobj); ++i) {
+        char* name = json_get_object_name(jobj, i);
+        json_value* value = json_get_object_value(jobj, i);
 
-    for (i = 0; i < json_get_object_length(jobj); ++i) {
-        name = json_get_object_name(jobj, i);
-        value = json_get_object_value(jobj, i);
-
-        if (!strcmp(name, "remote_host")) {
+         if (!strcmp(name, "label")) {
             if (json_get_type(value) != json_string) {
+                fprintf(stderr, "invalid config value for <label>.\n");
                 return -1;
             }
-            xstr_assign(&cfg->remote_host,
-                json_get_string(value), json_get_string_length(value));
+            cfg->label = jstrdup(value);
+        } else if (!strcmp(name, "remote_host")) {
+            if (json_get_type(value) != json_string || !json_get_string_length(value)) {
+                fprintf(stderr, "invalid config value for <remote_host>.\n");
+                return -1;
+            }
+            cfg->remote_host = jstrdup(value);
         } else if (!strcmp(name, "remote_port")) {
             if (json_get_type(value) != json_integer) {
+                fprintf(stderr, "invalid config value for <remote_port>.\n");
                 return -1;
             }
-            cfg->remote_port = json_get_int(value);
+            cfg->remote_port = (int)json_get_int(value);
         } else if (!strcmp(name, "remote_user")) {
-            if (json_get_type(value) != json_string) {
+            if (json_get_type(value) != json_string || !json_get_string_length(value)) {
+                fprintf(stderr, "invalid config value for <remote_user>.\n");
                 return -1;
             }
-            xstr_assign(&cfg->remote_user,
-                json_get_string(value), json_get_string_length(value));
+            cfg->remote_user = jstrdup(value);
         } else if (!strcmp(name, "remote_passwd")) {
-            if (json_get_type(value) != json_string) {
+            if (json_get_type(value) != json_string || !json_get_string_length(value)) {
+                fprintf(stderr, "invalid config value for <remote_passwd>.\n");
                 return -1;
             }
-            xstr_assign(&cfg->remote_passwd,
-                json_get_string(value), json_get_string_length(value));
+            cfg->remote_passwd = jstrdup(value);
         } else if (!strcmp(name, "remote_path")) {
-            if (json_get_type(value) != json_string) {
+            if (json_get_type(value) != json_string || !json_get_string_length(value)) {
+                fprintf(stderr, "invalid config value for <remote_path>.\n");
                 return -1;
             }
-            xstr_assign(&cfg->remote_path,
-                json_get_string(value), json_get_string_length(value));
-        } else if (!strcmp(name, "local_files")) {
+            cfg->remote_path = jstrdup(value);
+        } else if (!strcmp(name, "ignore_files")) {
             if (json_get_type(value) != json_array) {
+                fprintf(stderr, "invalid config value for <ignore_files>.\n");
                 return -1;
             }
-            set_local_files(&cfg->local_files, value);
+            if (set_ignore_files(cfg, value) != 0) {
+                return -1;
+            }
         } else if (!strcmp(name, "local_path")) {
-            if (json_get_type(value) != json_string) {
+            if (json_get_type(value) != json_string || !json_get_string_length(value)) {
+                fprintf(stderr, "invalid config value for <local_path>.\n");
                 return -1;
             }
-            xstr_assign(&cfg->local_path,
-                json_get_string(value), json_get_string_length(value));
-        } else if (!strcmp(name, "db_path")) {
-            if (json_get_type(value) != json_string) {
-                return -1;
-            }
-            xstr_assign(&cfg->db_path,
-                json_get_string(value), json_get_string_length(value));
-        } else if (!strcmp(name, "use_sftp")) {
+            cfg->local_path = jstrdup(value);
+        } else if (!strcmp(name, "follow_link")) {
             if (json_get_type(value) != json_boolean) {
+                fprintf(stderr, "invalid config value for <follow_link>.\n");
                 return -1;
             }
-            cfg->use_sftp = json_get_bool(value);
-        } else if (!strcmp(name, "disable")) {
+            cfg->follow_link = json_get_bool(value);
+        } else if (!strcmp(name, "use_compress")) {
             if (json_get_type(value) != json_boolean) {
+                fprintf(stderr, "invalid config value for <use_compress>.\n");
                 return -1;
             }
-            cfg->disable = json_get_bool(value);
+            cfg->use_compress = json_get_bool(value);
+        } else {
+            fprintf(stderr, "unkown config key <%s>.\n", name);
+            return -1;
         }
     }
 
-    if (xstr_empty(&cfg->remote_host) || xstr_empty(&cfg->remote_user)
-            || xstr_empty(&cfg->remote_passwd) || xstr_empty(&cfg->remote_path)
-            || xlist_empty(&cfg->local_files) || xstr_empty(&cfg->local_path))
+    if (!cfg->remote_host || !cfg->remote_user || !cfg->remote_passwd
+            || !cfg->remote_path || !cfg->local_path) {
+        fprintf(stderr, "need more config item.\n");
         return -1;
+    }
 
+    if (!cfg->label) {
+        cfg->label = __dummy_label;
+    }
+    if (!cfg->ignore_files) {
+        cfg->ignore_files = &__dummy_ignoref;
+    }
     return 0;
 }
 
@@ -152,7 +168,7 @@ static char* file_full_read(const char* file, int* blen)
 
     fp = fopen(file, "rb");
     if (!fp) {
-        fprintf(stderr, "open config file [%s] failed.\n", file);
+        fprintf(stderr, "open config file (%s) failed.\n", file);
         goto err;
     }
 
@@ -160,11 +176,11 @@ static char* file_full_read(const char* file, int* blen)
     fclose(fp);
 
     if (nr <= 0) {
-        fprintf(stderr, "failed read config file [%s].\n", file);
+        fprintf(stderr, "failed read config file (%s).\n", file);
         goto err;
     }
     if (nr == CONFIG_FILE_MAXSZ) {
-        fprintf(stderr, "config file [%s] too large.\n", file);
+        fprintf(stderr, "config file (%s) too large.\n", file);
         goto err;
     }
 
@@ -175,23 +191,27 @@ err:
     return NULL;
 }
 
-int configs_load(xlist_t* cfgs, const char* file)
+xlist_t* configs_load(const char* file)
 {
-    int i;
-    char* buf = file_full_read(file, &i);
+    json_settings sets = { 0, json_enable_comments };
+    xlist_t* cfgs;
+    int sz;
+    char* buf = file_full_read(file, &sz);
     json_value* jval;
 
-    if (!buf) return -1;
+    if (!buf) {
+        return NULL;
+    }
 
-    jval = json_parse(buf, i);
+    jval = json_parse_ex (&sets, buf, sz, 0);
     free(buf);
 
     if (!jval) {
         fprintf(stderr, "unable to parse data as a json.\n");
-        return -1;
+        return NULL;
     }
 
-    xlist_init(cfgs, sizeof(config_t), destroy_config);
+    cfgs = xlist_new(sizeof(config_t), destroy_config);
 
     if (json_get_type(jval) == json_object) {
         config_t* cfg = xlist_alloc_back(cfgs);
@@ -201,7 +221,7 @@ int configs_load(xlist_t* cfgs, const char* file)
             goto error;
         }
     } else if (json_get_type(jval) == json_array) {
-        for (i = 0; i < json_get_array_length(jval); ++i) {
+        for (unsigned i = 0; i < json_get_array_length(jval); ++i) {
             config_t* cfg = xlist_alloc_back(cfgs);
 
             init_config(cfg);
@@ -210,19 +230,19 @@ int configs_load(xlist_t* cfgs, const char* file)
             }
         }
     } else {
+        fprintf(stderr, "invalid config item.\n");
         goto error;
     }
 
     json_value_free(jval);
-    return 0;
+    return cfgs;
 error:
-    fprintf(stderr, "invalid json config file.\n");
     configs_destroy(cfgs);
     json_value_free(jval);
-    return -1;
+    return NULL;
 }
 
-void configs_destroy(xlist_t* opts)
+void configs_destroy(xlist_t* cfgs)
 {
-    xlist_destroy(opts);
+    xlist_free(cfgs);
 }

@@ -1,6 +1,12 @@
 #ifndef _VERSION_H_
 #define _VERSION_H_
 
-#define VERSION_STRING  "1.2.1"
+#define VERSION_STRING_BASE  "2.0.0"
+
+#if defined(GIT_COMMIT_ID)
+#define VERSION_STRING VERSION_STRING_BASE "-" GIT_COMMIT_ID
+#else
+#define VERSION_STRING VERSION_STRING_BASE
+#endif
 
 #endif // _VERSION_H_

@@ -1,7 +1,7 @@
 #include <string.h>
-#ifdef _WIN32
-#include <windows.h>
-#else
+#include <stdlib.h>
+#ifndef _WIN32
+#include <errno.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #endif
@@ -47,7 +47,7 @@ static int glob_match(char const *pat, char const *str)
      * (no exception for /), it can be easily proved that there's
      * never a need to backtrack multiple levels.
      */
-    char const *back_pat = 0, *back_str = back_str;
+    char const *back_pat = NULL, *back_str = NULL;
 
     /*
      * Loop over each token (character or class) in pat, matching
@@ -123,255 +123,314 @@ backtrack:
     }
 }
 
-#ifdef _WIN32
-/* FILETIME to UNIX time */
-static inline uint64_t time_win2unix(PFILETIME t)
+static int is_ignored(const char* path, char* const ignores[])
 {
-#define WIN_TICK 10000000
-#define SEC_TO_UNIX_EPOCH 11644473600LL
-    return ((uint64_t)t->dwHighDateTime << 32 | t->dwLowDateTime)
-            / WIN_TICK - SEC_TO_UNIX_EPOCH;
+    while (ignores[0]) {
+        if (glob_match(ignores[0], path)) {
+            return 1;
+        }
+        ++ignores;
+    }
+    return 0;
 }
-#endif
 
-/* ckech if equal to "." or ".." */
+/* check if equal to "." or ".." */
 static inline int is_valid_name(const char* s)
 {
     return !(s[0] == '.' && (s[1] == '\0' || (s[1] == '.' && s[2] == '\0')));
 }
 
-/* check if equal to "**" */
-static inline int is_match_all(const char* s)
+#ifdef _WIN32
+
+static inline int fattr2mode(DWORD attrs)
 {
-    return s[0] == '*' && s[1] == '*' && s[2] == '\0';
+    int mode = 0644;
+
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
+        mode |= LIBSSH2_SFTP_S_IFDIR;
+    } else {
+        mode |= LIBSSH2_SFTP_S_IFREG;
+    }
+    return mode;
 }
 
-/* match files recursively. */
-static void match_files_rec(xstr_t* path, char* pattern,
-                match_cb_t cb, unsigned baseoff)
+/* FILETIME to UNIX time */
+static inline time_t filetime2time(FILETIME t)
 {
-    unsigned off;
-    char* p;
-#ifndef _WIN32
-    struct stat s;
-#endif
+    return (time_t)(((uint64_t)t.dwHighDateTime << 32 | t.dwLowDateTime)
+            / 10000000 - 11644473600LL);
+}
 
+static void new_file_item(xlist_t* items, const char* file,
+        const WIN32_FILE_ATTRIBUTE_DATA* fattrs)
+{
+    file_item_t* item = xlist_alloc_back(items);
+
+    item->file = _strdup(file);
+    item->mode = fattr2mode(fattrs->dwFileAttributes);
+    item->mtime = filetime2time(fattrs->ftLastWriteTime);
+    item->size = (uint64_t)fattrs->nFileSizeHigh << 32 | fattrs->nFileSizeLow;
+}
+
+static void iterate_local_directory(xlist_t* items, xstr_t* path, size_t baseoff,
+        char* const ignores[])
+{
+    WIN32_FIND_DATAA fdata;
+    HANDLE fh;
+    size_t off;
+
+    xstr_push_back(path, '*');
+    fh = FindFirstFileA(xstr_data(path), &fdata);
+    xstr_pop_back(path);
+
+    if (fh == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    off = xstr_size(path);
     do {
-        /* find file separater or wildcard chars. */
-        p = strpbrk(pattern, "/*?[");
+        if (is_valid_name(fdata.cFileName)) {
+            xstr_append(path, fdata.cFileName);
 
-        if (!p) {
-            /* found nothing, check file exist and break. */
-#ifdef _WIN32
-            WIN32_FILE_ATTRIBUTE_DATA fattr;
-#endif
-            off = xstr_size(path);
-            xstr_append(path, pattern, -1);
+            if (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                xstr_push_back(path, '/');
 
-#ifdef _WIN32
-            if (GetFileAttributesExA(xstr_data(path), GetFileExInfoStandard, &fattr)
-                    && !(fattr.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                if (!is_ignored(xstr_data(path) + baseoff, ignores)) {
+                    new_file_item(items, xstr_data(path) + baseoff,
+                        (WIN32_FILE_ATTRIBUTE_DATA*)&fdata);
+                    iterate_local_directory(items, path, baseoff, ignores);
+                }
+            } else if (!is_ignored(xstr_data(path) + baseoff, ignores)) {
 
-                cb(xstr_data(path) + baseoff, 0644, time_win2unix(&fattr.ftLastWriteTime),
-                    (uint64_t)fattr.nFileSizeHigh << 32 | fattr.nFileSizeLow);
+                new_file_item(items, xstr_data(path) + baseoff,
+                    (WIN32_FILE_ATTRIBUTE_DATA*)&fdata);
             }
-#else
-            if (stat(xstr_data(path), &s) != -1 && S_ISREG(s.st_mode)) {
-                cb(xstr_data(path) + baseoff, s.st_mode & 0777, s.st_mtime, s.st_size);
-            }
-#endif
-            xstr_erase(path, off, -1);
-            break;
+
+            xstr_erase_after(path, off);
         }
-
-        if (p[0] != '/') {
-            /* found a wildcard char, match files/dirs and break. */
-#ifdef _WIN32
-            WIN32_FIND_DATAA fdata;
-            HANDLE fh;
-#else
-            struct dirent* ent;
-            DIR* dir;
-#endif
-
-#ifdef _WIN32
-            xstr_push_back(path, '*');
-            fh = FindFirstFileA(xstr_data(path), &fdata);
-            xstr_pop_back(path);
-#else
-            dir = opendir(xstr_data(path));
-#endif
-
-#ifdef _WIN32
-            if (fh == INVALID_HANDLE_VALUE) {
-#else
-            if (!dir) {
-#endif
-                /* 'path' not valid, break. */
-                break;
-            }
-
-            if (is_match_all(pattern)) {
-                /* pattern equal to "**", match file recursively and break. */
-#ifdef _WIN32
-                do {
-                    if (!is_valid_name(fdata.cFileName)) continue;
-
-                    off = xstr_size(path);
-                    xstr_append(path, fdata.cFileName, -1);
-
-                    if (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                        xstr_push_back(path, '/');
-                        match_files_rec(path, pattern, cb, baseoff);
-                    } else {
-                        cb(xstr_data(path) + baseoff, 0644, time_win2unix(&fdata.ftLastWriteTime),
-                            (uint64_t)fdata.nFileSizeHigh << 32 | fdata.nFileSizeLow);
-                    }
-
-                    xstr_erase(path, off, -1);
-                }
-                while (FindNextFileA(fh, &fdata));
-                FindClose(fh);
-#else
-                while (!!(ent = readdir(dir))) {
-
-                    if (!is_valid_name(ent->d_name)) continue;
-
-                    off = xstr_size(path);
-                    xstr_append(path, ent->d_name, -1);
-
-                    if (stat(xstr_data(path), &s) != -1) {
-                        if (S_ISDIR(s.st_mode)) {
-                            xstr_push_back(path, '/');
-                            match_files_rec(path, pattern, cb, baseoff);
-                        } else if (S_ISREG(s.st_mode)) {
-                            cb(xstr_data(path) + baseoff, s.st_mode & 0777,
-                                s.st_mtime, s.st_size);
-                        }
-                    }
-
-                    xstr_erase(path, off, -1);
-                }
-                closedir(dir);
-#endif
-                break;
-            }
-
-            /* find next file separater. */
-            p = strchr(p, '/');
-
-            if (!p) {
-                /* file separater not found, match file and break. */
-#ifdef _WIN32
-                do {
-                    if (!(fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-                            && glob_match(pattern, fdata.cFileName)) {
-
-                        off = xstr_size(path);
-                        xstr_append(path, fdata.cFileName, -1);
-
-                        cb(xstr_data(path) + baseoff, 0644, time_win2unix(&fdata.ftLastWriteTime),
-                            (uint64_t)fdata.nFileSizeHigh << 32 | fdata.nFileSizeLow);
-
-                        xstr_erase(path, off, -1);
-                    }
-                }
-                while (FindNextFileA(fh, &fdata));
-#else
-                while (!!(ent = readdir(dir))) {
-
-                    if (is_valid_name(ent->d_name)
-                            && glob_match(pattern, ent->d_name)) {
-
-                        off = xstr_size(path);
-                        xstr_append(path, ent->d_name, -1);
-
-                        if (stat(xstr_data(path), &s) != -1
-                                && S_ISREG(s.st_mode)) {
-                            cb(xstr_data(path) + baseoff, s.st_mode & 0777,
-                                s.st_mtime, s.st_size);
-                        }
-
-                        xstr_erase(path, off, -1);
-                    }
-                }
-#endif
-            } else {
-                /* file separater found, match directory recursively and break. */
-                p[0] = '\0';
-#ifdef _WIN32
-                do {
-                    if ((fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-                            && is_valid_name(fdata.cFileName)
-                            && glob_match(pattern, fdata.cFileName)) {
-
-                        off = xstr_size(path);
-
-                        xstr_append(path, fdata.cFileName, -1);
-                        xstr_push_back(path, '/');
-
-                        match_files_rec(path, p + 1, cb, baseoff);
-
-                        xstr_erase(path, off, -1);
-                    }
-                }
-                while (FindNextFileA(fh, &fdata));
-#else
-                while (!!(ent = readdir(dir))) {
-
-                    if (is_valid_name(ent->d_name)
-                            && glob_match(pattern, ent->d_name)) {
-
-                        off = xstr_size(path);
-
-                        xstr_append(path, ent->d_name, -1);
-                        xstr_push_back(path, '/');
-
-                        if (stat(xstr_data(path), &s) != -1
-                                && S_ISDIR(s.st_mode)) {
-                            match_files_rec(path, p + 1, cb, baseoff);
-                        }
-
-                        xstr_erase(path, off, -1);
-                    }
-                }
-#endif
-                p[0] = '/';
-            }
-
-#ifdef _WIN32
-            FindClose(fh);
-#else
-            closedir(dir);
-#endif
-            break;
-        }
-
-        /* found a file separater, append dir name to 'path' and continue. */
-        xstr_append(path, pattern, p - pattern);
-        xstr_push_back(path, '/');
-
-        pattern = p + 1;
     }
-    while (1);
+    while (FindNextFileA(fh, &fdata));
+
+    FindClose(fh);
 }
 
-void match_files(const char* path, const char* pattern, match_cb_t cb)
+#else
+static void new_file_item(xlist_t* items, const char* file, const struct stat* st)
 {
-    xstr_t _path;
-    xstr_t _pattern;
+    file_item_t* item = xlist_alloc_back(items);
 
-    xstr_init(&_path, 128);
-    xstr_init_with(&_pattern, pattern, -1);
+    item->file = strdup(file);
+    item->mode = st->st_mode;
+    item->mtime = st->st_mtime;
+    item->size = st->st_size;
+}
 
-    xstr_append(&_path, path, -1);
-    if (xstr_back(&_path) != '/') {
-        xstr_push_back(&_path, '/');
+static void iterate_local_directory(xlist_t* items, xstr_t* path, size_t baseoff,
+        char* const ignores[], int (*statcb)(const char*, struct stat*))
+{
+    DIR* dir;
+    struct dirent* ent;
+    struct stat st;
+    size_t off;
+
+    dir = opendir(xstr_data(path));
+    if (!dir) {
+        return;
     }
 
-    match_files_rec(&_path, xstr_data(&_pattern),
-        cb, xstr_size(&_path));
+    off = xstr_size(path);
+    while (!!(ent = readdir(dir))) {
+        if (is_valid_name(ent->d_name)) {
+            xstr_append(path, ent->d_name);
 
-    xstr_destroy(&_path);
-    xstr_destroy(&_pattern);
+            if (statcb(xstr_data(path), &st) == 0) {
+                if (S_ISDIR(st.st_mode)) {
+                    xstr_push_back(path, '/');
+
+                    if (!is_ignored(xstr_data(path) + baseoff, ignores)) {
+                        new_file_item(items, xstr_data(path) + baseoff, &st);
+                        iterate_local_directory(items, path, baseoff, ignores, statcb);
+                    }
+                } else if (!is_ignored(xstr_data(path) + baseoff, ignores)) {
+
+                    new_file_item(items, xstr_data(path) + baseoff, &st);
+                }
+            }
+
+            xstr_erase_after(path, off);
+        }
+    }
+
+    closedir(dir);
+}
+#endif
+
+static void new_remote_file_item(xlist_t* items, const char* file,
+        const LIBSSH2_SFTP_ATTRIBUTES* attrs)
+{
+    file_item_t* item = xlist_alloc_back(items);
+#ifdef _WIN32
+    item->file = _strdup(file);
+#else
+    item->file = strdup(file);
+#endif
+    item->mode = attrs->permissions;
+    item->mtime = attrs->mtime;
+    item->size = attrs->filesize;
+}
+
+static void iterate_remote_directory(xlist_t* items, xstr_t* path, size_t baseoff,
+        char* const ignores[], int follnk, LIBSSH2_SFTP* sftp)
+{
+    LIBSSH2_SFTP_HANDLE* dir;
+    LIBSSH2_SFTP_ATTRIBUTES attrs;
+    char name[512];
+    size_t off;
+
+    dir = libssh2_sftp_opendir(sftp, xstr_data(path));
+    if (!dir) {
+        return;
+    }
+
+    off = xstr_size(path);
+    while (libssh2_sftp_readdir(dir, name, sizeof(name), &attrs) > 0) {
+        if (is_valid_name(name)) {
+            xstr_append(path, name);
+
+            if (!LIBSSH2_SFTP_S_ISLNK(attrs.permissions) || !follnk
+                    || libssh2_sftp_stat_ex(sftp, xstr_data(path), xstr_size(path),
+                            LIBSSH2_SFTP_STAT, &attrs) == 0) {
+                if (LIBSSH2_SFTP_S_ISDIR(attrs.permissions)) {
+                    xstr_push_back(path, '/');
+
+                    if (!is_ignored(xstr_data(path) + baseoff, ignores)) {
+                        new_remote_file_item(items, xstr_data(path) + baseoff, &attrs);
+                        iterate_remote_directory(items, path, baseoff, ignores, follnk, sftp);
+                    }
+                } else if (!is_ignored(xstr_data(path) + baseoff, ignores)) {
+
+                    new_remote_file_item(items, xstr_data(path) + baseoff, &attrs);
+                }
+            }
+
+            xstr_erase_after(path, off);
+        }
+    }
+
+    libssh2_sftp_closedir(dir);
+}
+
+static void free_file_item(void* v)
+{
+    file_item_t* item = v;
+
+    free(item->file);
+}
+
+static int cmp_file_item(void* l, void* r)
+{
+    return strcmp(((file_item_t*)l)->file, ((file_item_t*)r)->file);
+}
+
+xlist_t* iterate_directory(const char* _path, char* const ignores[], int follnk, LIBSSH2_SFTP* sftp)
+{
+    xlist_t* items = xlist_new(sizeof(file_item_t), free_file_item);
+    xstr_t path;
+
+    xstr_init_ex(&path, 512);
+    xstr_append(&path, _path);
+
+    if (xstr_back(&path) != '/') {
+        xstr_push_back(&path, '/');
+    }
+    if (sftp) {
+        iterate_remote_directory(items, &path, xstr_size(&path), ignores, follnk, sftp);
+    } else {
+#ifdef _WIN32
+        iterate_local_directory(items, &path, xstr_size(&path), ignores);
+#else
+        iterate_local_directory(items, &path, xstr_size(&path), ignores,
+            follnk ? stat : lstat);
+#endif
+    }
+    xlist_msort(items, cmp_file_item);
+
+    xstr_destroy(&path);
+    return items;
+}
+
+static inline int file_type_equal(int t1, int t2)
+{
+    return (t1 & LIBSSH2_SFTP_S_IFMT) == (t2 & LIBSSH2_SFTP_S_IFMT);
+}
+
+void iterate_directory_setextra(xlist_t* items, const char* _path, int follnk, LIBSSH2_SFTP* sftp)
+{
+    xstr_t path;
+    size_t off;
+
+    xstr_init_ex(&path, 512);
+    xstr_append(&path, _path);
+    xstr_push_back(&path, '/');
+
+    off = xstr_size(&path);
+    if (sftp) {
+        LIBSSH2_SFTP_ATTRIBUTES attrs;
+
+        for (xlist_iter_t i = xlist_begin(items);
+                i != xlist_end(items); i = xlist_iter_next(i)) {
+            file_item_t* item = xlist_iter_value(i);
+
+            xstr_assign_at(&path, off, item->file);
+            if (libssh2_sftp_stat_ex(sftp, xstr_data(&path), xstr_size(&path),
+                    follnk ? LIBSSH2_SFTP_STAT : LIBSSH2_SFTP_LSTAT, &attrs) < 0) {
+                item->is_newer = libssh2_sftp_last_error(sftp) == LIBSSH2_FX_NO_SUCH_FILE;
+                item->is_exist = 0;
+            } else {
+                item->is_newer = file_type_equal(attrs.permissions, item->mode)
+                        && attrs.mtime < item->mtime;
+                item->is_exist = 1;
+            }
+        }
+    } else {
+#ifdef _WIN32
+        WIN32_FILE_ATTRIBUTE_DATA fattrs;
+#else
+        struct stat statbuf;
+#endif
+        for (xlist_iter_t i = xlist_begin(items);
+                i != xlist_end(items); i = xlist_iter_next(i)) {
+            file_item_t* item = xlist_iter_value(i);
+
+            xstr_assign_at(&path, off, item->file);
+            /* check remote file's mtime */
+#ifdef _WIN32
+            if (GetFileAttributesExA(xstr_data(&path), GetFileExInfoStandard, &fattrs)) {
+                item->is_newer = file_type_equal(fattr2mode(fattrs.dwFileAttributes), item->mode)
+                        && filetime2time(fattrs.ftLastWriteTime) < item->mtime;
+                item->is_exist = 1;
+            } else {
+                DWORD e = GetLastError();
+                item->is_newer = (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND);
+                item->is_exist = 0;
+            }
+#else
+            if ((follnk ? stat(xstr_data(&path), &statbuf)
+                        : lstat(xstr_data(&path), &statbuf)) < 0) {
+                item->is_newer = errno == ENOENT;
+                item->is_exist = 0;
+            } else {
+                item->is_newer = file_type_equal(statbuf.st_mode, item->mode)
+                        && statbuf.st_mtime < item->mtime;
+                item->is_exist = 1;
+            }
+#endif
+        }
+    }
+
+    xstr_destroy(&path);
+}
+
+void iterate_directory_free(xlist_t* items)
+{
+    xlist_free(items);
 }
