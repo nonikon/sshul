@@ -17,10 +17,6 @@
 
 #define GENERIC_BUF_SIZE    16384
 
-#ifndef _WIN32
-#define closesocket     close
-#endif
-
 static char* generic_buf;
 
 static libssh2_socket_t connect_tcp_server(const char* host, int port)
@@ -56,7 +52,11 @@ static libssh2_socket_t connect_tcp_server(const char* host, int port)
     freeaddrinfo(res);
     return sock;
 error:
+#ifdef _WIN32
     closesocket(sock);
+#else
+    close(sock);
+#endif
     if (res) {
         freeaddrinfo(res);
     }
@@ -105,8 +105,11 @@ ssh_t* ssh_session_open(const char* host, int port, int compress,
     return s;
 error:
     ssh_session_close(s);
+#ifdef _WIN32
     closesocket(sock);
-
+#else
+    close(sock);
+#endif
     return NULL;
 }
 
@@ -187,7 +190,6 @@ int sftp_send_file(sftp_t* s, const char* local, const char* remote,
         int percent = 0;
         uint64_t cursize = 0;
 
-        fprintf(stdout, "\033[s0%%\033[u");
         while (1) {
             pos = generic_buf;
             nread = fread(generic_buf, 1, GENERIC_BUF_SIZE, fp);
@@ -196,7 +198,7 @@ int sftp_send_file(sftp_t* s, const char* local, const char* remote,
                 nwrite = (int)(cursize * 100 / size);
                 if (nwrite != percent) {
                     percent = nwrite;
-                    fprintf(stdout, "%d%%\033[u", percent);
+                    fprintf(stdout, "\033[u%3d%%", percent);
                     fflush(stdout);
                 }
                 do {
@@ -304,6 +306,7 @@ int sftp_recv_file(sftp_t* s, const char* local, const char* remote,
 #endif
     if (!fp) {
         fprintf(stdout, "open local file (%s) failed", local);
+        // close(fd);
         return -1;
     }
 
@@ -314,7 +317,6 @@ int sftp_recv_file(sftp_t* s, const char* local, const char* remote,
         int percent = 0;
         uint64_t cursize = 0;
 
-        fprintf(stdout, "\033[s0%%\033[u");
         while (1) {
             nread = libssh2_sftp_read(hdl, generic_buf, GENERIC_BUF_SIZE);
             if (nread > 0) {
@@ -322,7 +324,7 @@ int sftp_recv_file(sftp_t* s, const char* local, const char* remote,
                 nwrite = (int)(cursize * 100 / size);
                 if (nwrite != percent) {
                     percent = nwrite;
-                    fprintf(stdout, "%d%%\033[u", percent);
+                    fprintf(stdout, "\033[u%3d%%", percent);
                     fflush(stdout);
                 }
                 nwrite = fwrite(generic_buf, 1, nread, fp);

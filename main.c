@@ -17,8 +17,7 @@
 
 enum {
     ACT_NONE,
-    ACT_LIST_ALL,
-    ACT_LIST_UPDOWN,
+    ACT_LIST,
     ACT_UPDOWN,
 };
 
@@ -31,7 +30,7 @@ enum {
     "\t,\"remote_passwd\": \"123456\"\n" \
     "\t,\"remote_path\": \"/tmp\"\n" \
     "\t,\"local_path\": \".\"\n" \
-    "\t,\"ignore_files\": [ \"*.o\", \".git/\", \".vscode/\" ]\n" \
+    "\t,\"ignore_files\": [ \"*.o\", \".git/\", \".vscode/\", \"build/\", \"sshul.json\" ]\n" \
     "\t,\"follow_link\": false\n" \
     "\t,\"use_compress\": false\n" \
     "}]\n"
@@ -190,7 +189,7 @@ static const char* get_ftype_str(int mode)
     }
 }
 
-static void do_list_all(xlist_t* items)
+static void do_list(xlist_t* items)
 {
     for (xlist_iter_t i = xlist_begin(items);
             i != xlist_end(items); i = xlist_iter_next(i)) {
@@ -210,26 +209,39 @@ static void do_list_all(xlist_t* items)
     }
 }
 
-static void do_list_updown(xlist_t* items, config_t* cfg, sftp_t* sftp, int reverse)
-{
-    for (xlist_iter_t i = xlist_begin(items);
-            i != xlist_end(items); i = xlist_iter_next(i)) {
-        file_item_t* item = xlist_iter_value(i);
-        const char* type = get_ftype_str(item->mode);
-
-        if (type && item->is_newer) {
-            fprintf(stdout, item->is_exist ? "\033[31m[OVR %s]\033[0m %s\n"
-                : "\033[32m[NEW %s]\033[0m %s\n", type, item->file);
-        }
-    }
-}
-
-static void do_updown(xlist_t* items, config_t* cfg, sftp_t* sftp, int reverse)
+static void do_updown(xlist_t* items, config_t* cfg, sftp_t* sftp, int reverse, int prompt)
 {
     xstr_t local;
     xstr_t remote;
     size_t ol;
     size_t or;
+
+    if (prompt) {
+        size_t n = 0;
+
+        for (xlist_iter_t i = xlist_begin(items);
+                i != xlist_end(items); i = xlist_iter_next(i)) {
+            file_item_t* item = xlist_iter_value(i);
+            const char* type = get_ftype_str(item->mode);
+
+            if (type && item->is_newer) {
+                fprintf(stdout, item->is_exist ? "\033[31m[OVR %s]\033[0m %s\n"
+                    : "\033[32m[NEW %s]\033[0m %s\n", type, item->file);
+                ++n;
+            }
+        }
+        if (n > 0) {
+            char input[8] = { 0 };
+
+            fprintf(stdout, "The above files will be %s, continue? (Y/n):",
+                reverse ? "downloaded" : "uploaded");
+            fgets(input, sizeof(input), stdin);
+            if (input[0] != 'y' && input[0] != 'Y') {
+                fprintf(stdout, "exit\n");
+                return;
+            }
+        }
+    }
 
     if (reverse) {
         if (check_local_dir(cfg->local_path, 1) != 0) {
@@ -263,14 +275,14 @@ static void do_updown(xlist_t* items, config_t* cfg, sftp_t* sftp, int reverse)
 
             if (reverse) {
                 fprintf(stdout, item->is_exist
-                            ? "\033[31m[DOWNLOAD]\033[0m %s \033[?25l\033[90m"
-                            : "\033[32m[DOWNLOAD]\033[0m %s \033[?25l\033[90m", item->file);
+                            ? "\033[31m [DOWNLD]\033[0m \033[s---- %s \033[?25l\033[31m"
+                            : "\033[32m [DOWNLD]\033[0m \033[s---- %s \033[?25l\033[31m", item->file);
                 sftp_recv_file(sftp, xstr_data(&local), xstr_data(&remote),
                     item->mode, item->is_exist, item->mtime, item->size);
             } else {
                 fprintf(stdout, item->is_exist
-                            ? "\033[31m[UPLOAD]\033[0m %s \033[?25l\033[90m"
-                            : "\033[32m[UPLOAD]\033[0m %s \033[?25l\033[90m", item->file);
+                            ? "\033[31m [UPLOAD]\033[0m \033[s---- %s \033[?25l\033[31m"
+                            : "\033[32m [UPLOAD]\033[0m \033[s---- %s \033[?25l\033[31m", item->file);
                 sftp_send_file(sftp, xstr_data(&local), xstr_data(&remote),
                     item->mode, item->is_exist, item->mtime, item->size);
             }
@@ -282,7 +294,7 @@ static void do_updown(xlist_t* items, config_t* cfg, sftp_t* sftp, int reverse)
     xstr_destroy(&remote);
 }
 
-static void process_config(config_t* cfg, int action, int reverse)
+static void process_config(config_t* cfg, int action, int reverse, int prompt)
 {
     xlist_t* items;
     ssh_t* scp;
@@ -318,14 +330,11 @@ static void process_config(config_t* cfg, int action, int reverse)
     }
 
     switch (action) {
-    case ACT_LIST_ALL:
-        do_list_all(items);
-        break;
-    case ACT_LIST_UPDOWN:
-        do_list_updown(items, cfg, sftp, reverse);
+    case ACT_LIST:
+        do_list(items);
         break;
     case ACT_UPDOWN:
-        do_updown(items, cfg, sftp, reverse);
+        do_updown(items, cfg, sftp, reverse, prompt);
         break;
     }
 
@@ -340,10 +349,10 @@ static void usage(const char* s)
     fprintf(stderr, "sshul " VERSION_STRING ", libssh2 " LIBSSH2_VERSION
         ", usage: %s [OPTION]... [CFG_FILE][:LABEL]\n"
         "[OPTION]:\n"
-        "  -l   list the files to be uploaded (or downloaded).\n"
-        "  -a   list all matched file.\n"
-        "  -x   upload or download the target files.\n"
+        "  -l   list all matched file.\n"
+        "  -x   upload or download the newer files.\n"
         "  -r   switch to download mode (default is upload).\n"
+        "  -y   automatic yes to prompts.\n"
         "  -t   generate template config file (" DEFAULT_CONFIG_FILE ").\n"
         "  -v   show version message.\n"
         "  -h   show this help message.\n", s);
@@ -354,14 +363,14 @@ static void usage(const char* s)
         "  remote_port   - ssh server port. (default: 22)\n"
         "  remote_user   - ssh user name.\n"
         "  remote_passwd - ssh user password.\n"
-        "  remote_path   - the remote path which remote files to.\n"
+        "  remote_path   - the remote path which remote files in.\n"
         "  local_path    - the local path which local files in.\n"
         "  ignore_files  - the file PATTERNs which used to filter remote or local files.\n"
         "  follow_link   - follow symbolic link. (default: false)\n"
         "  use_compress  - enable compress. (default: false)\n");
 
     fprintf(stderr, "[PATTERN] example:\n"
-        "  dir/*.[ch] dir/*/file.c dir/** di?/*.c dir/*.[a-z]\n");
+        "  dir/*.[ch] dir/*/file.c di?/*.c dir/*.[a-z]\n");
 }
 
 int main(int argc, char** argv)
@@ -370,6 +379,7 @@ int main(int argc, char** argv)
     const char* label = "";
     int action = ACT_NONE;
     int reverse = 0;
+    int prompt = 1;
 #ifdef _WIN32
     WSADATA wsData;
     WSAStartup(MAKEWORD(2, 2), &wsData);
@@ -393,10 +403,10 @@ int main(int argc, char** argv)
         }
         while (*++opt) {
             switch (opt[0]) {
-            case 'l': action = ACT_LIST_UPDOWN; continue;
-            case 'a': action = ACT_LIST_ALL; continue;
+            case 'l': action = ACT_LIST; continue;
             case 'x': action = ACT_UPDOWN; continue;
             case 'r': reverse = 1; continue;
+            case 'y': prompt = 0; continue;
             case 't':
                 return generate_config_file(file);
             case 'v':
@@ -430,7 +440,7 @@ int main(int argc, char** argv)
             config_t* cfg = xlist_iter_value(i);
 
             if (!strcmp(cfg->label, label)) {
-                process_config(cfg, action, reverse);
+                process_config(cfg, action, reverse, prompt);
             }
         }
 
