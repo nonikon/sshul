@@ -144,12 +144,12 @@ static inline int is_valid_name(const char* s)
 
 static inline int fattr2mode(DWORD attrs)
 {
-    int mode = 0644;
+    int mode;
 
     if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
-        mode |= LIBSSH2_SFTP_S_IFDIR;
+        mode = 0755 | LIBSSH2_SFTP_S_IFDIR;
     } else {
-        mode |= LIBSSH2_SFTP_S_IFREG;
+        mode = 0644 | LIBSSH2_SFTP_S_IFREG;
     }
     return mode;
 }
